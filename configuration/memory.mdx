@@ -1,0 +1,185 @@
+---
+title: 'Memory and Context Management in OpenGame'
+description: "Learn how OpenGame loads QWEN.md context files, use /memory to inspect and refresh context, filter with .qwenignore, and resume sessions using /summary."
+---
+
+OpenGame maintains an ongoing understanding of your project through a layered context system. Rather than relying solely on what you type in each prompt, the agent reads Markdown "context files" from your project's directory hierarchy and assembles them into a system-level context that persists across your session. This lets you encode project conventions, coding standards, and domain knowledge once — in a file — and have the agent respect them automatically every time it responds.
+
+## How context files work
+
+By default, OpenGame looks for a file named `QWEN.md` in several locations and concatenates their contents into the agent's context. The file name is configurable via the `context.fileName` setting. The agent reads these files once at session start and again whenever you run `/memory refresh`.
+
+The loading hierarchy, from most general to most specific:
+
+1. **Global context file** — `~/.qwen/QWEN.md` in your home directory. Provides default instructions for all your projects.
+2. **Project root and ancestor context files** — OpenGame searches for the context file in the current working directory and each parent directory up to either the project root (identified by a `.git` folder) or your home directory.
+3. **Sub-directory context files** — The CLI also scans subdirectories below the current working directory (skipping `node_modules`, `.git`, and similar), up to a limit of 200 directories (configurable with `context.discoveryMaxDirs`).
+
+The contents of all found files are concatenated with separators indicating each file's path. The CLI footer shows the count of loaded context files so you always know what is active.
+
+### Example QWEN.md
+
+```markdown QWEN.md
+# Project: My Awesome TypeScript Library
+
+## General instructions
+- When generating new TypeScript code, follow the existing coding style.
+- Ensure all new functions and classes have JSDoc comments.
+- Prefer functional programming paradigms where appropriate.
+- All code must be compatible with TypeScript 5.0 and Node.js 20+.
+
+## Coding style
+- Use 2 spaces for indentation.
+- Interface names should be prefixed with `I` (e.g., `IUserService`).
+- Private class members should be prefixed with an underscore (`_`).
+- Always use strict equality (`===` and `!==`).
+
+## src/api/client.ts
+- This file handles all outbound API requests.
+- Use the existing `fetchWithRetry` utility for all GET requests.
+- New API call functions must include robust error handling and logging.
+
+## Dependencies
+- Avoid introducing new external dependencies unless absolutely necessary.
+- If a new dependency is required, state the reason clearly.
+```
+
+## Configuring context loading
+
+The following settings control how OpenGame discovers and loads context:
+
+<ParamField path="context.fileName" type="string | array">
+  Name(s) of the context file(s) to search for. Defaults to `QWEN.md`. You can specify an array to load multiple file names, e.g. `["CONTEXT.md", "QWEN.md"]`.
+</ParamField>
+
+<ParamField path="context.discoveryMaxDirs" type="number">
+  Maximum number of directories to scan when looking for context files in subdirectories. Defaults to `200`.
+</ParamField>
+
+<ParamField path="context.includeDirectories" type="array">
+  Additional absolute or relative paths (supports `~`) to include in the workspace context. Useful for monorepos or shared libraries outside the project root. Missing directories are skipped with a warning. Can also be set with the `--include-directories` CLI flag.
+</ParamField>
+
+<ParamField path="context.loadFromIncludeDirectories" type="boolean">
+  When `true`, `/memory refresh` also loads context files from directories listed in `context.includeDirectories`. When `false` (the default), only the current project directory is searched.
+</ParamField>
+
+```json .qwen/settings.json
+{
+  "context": {
+    "fileName": ["CONTEXT.md", "QWEN.md"],
+    "includeDirectories": ["~/shared-conventions", "../design-system"],
+    "loadFromIncludeDirectories": true,
+    "discoveryMaxDirs": 300
+  }
+}
+```
+
+## The /memory command
+
+The `/memory` command lets you inspect and refresh the agent's loaded context without restarting your session.
+
+<AccordionGroup>
+  <Accordion title="/memory show — inspect loaded context">
+    Displays the combined instructional context currently active, with separators showing each file's origin path. Use this to verify what the agent is reading and debug unexpected behavior.
+
+    ```
+    /memory show
+    ```
+  </Accordion>
+  <Accordion title="/memory refresh — reload from disk">
+    Forces a rescan and reload of all context files from all configured locations. Run this after editing a `QWEN.md` file mid-session to pick up your changes without restarting.
+
+    ```
+    /memory refresh
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Importing content into context files
+
+You can modularize your context files by importing other Markdown files using the `@path/to/file.md` syntax inside a `QWEN.md`. The import processor resolves the path relative to the file containing the `@` reference and inlines the content.
+
+```markdown QWEN.md
+# Project context
+
+@./docs/conventions/typescript-style.md
+@./docs/conventions/git-workflow.md
+
+## Project-specific notes
+- The game engine lives in src/engine/.
+```
+
+This lets you share convention documents across projects while keeping the actual `QWEN.md` files short.
+
+## Filtering files with .qwenignore
+
+OpenGame respects a `.qwenignore` file in your project root to exclude files and directories from context search and tool operations like `read_many_files`. The syntax follows `.gitignore` conventions exactly.
+
+**Rules:**
+- Blank lines and lines beginning with `#` are ignored (comments).
+- Standard glob patterns are supported: `*`, `?`, `[]`.
+- A trailing `/` matches directories only.
+- A leading `/` anchors the pattern to the `.qwenignore` file's location.
+- `!` negates a pattern (re-includes something previously excluded).
+
+```text .qwenignore
+# Exclude build output and dependencies
+/dist/
+/node_modules/
+/packages/
+
+# Exclude secrets
+apikeys.txt
+*.pem
+
+# Exclude all markdown except README
+*.md
+!README.md
+```
+
+<Note>
+  Changes to `.qwenignore` take effect after you restart your OpenGame session. Editing the file mid-session does not update the active ignore rules until the next launch.
+</Note>
+
+The `context.fileFiltering.respectQwenIgnore` setting (default `true`) controls whether `.qwenignore` is honored. Set it to `false` in `settings.json` to disable the filter globally.
+
+## Session resumption with /summary
+
+The `/summary` command generates a `PROJECT_SUMMARY.md` file inside `.qwen/` that captures a concise overview of your current session's work — what was built, key decisions made, and the current state of the project.
+
+```
+/summary
+```
+
+When `ui.enableWelcomeBack` is `true` (the default), OpenGame detects an existing `.qwen/PROJECT_SUMMARY.md` on startup and shows a welcome-back dialog. You can choose to:
+
+- **Continue** — the summary is injected into the new session's context, letting the agent resume with full awareness of prior work.
+- **Start fresh** — the summary is ignored and the session begins without prior context.
+
+This workflow is especially useful for long game-development projects where you pause and resume over multiple days.
+
+<Tip>
+  Run `/summary` before closing a long session even if you plan to continue soon. It costs very little and means you never lose track of where you left off.
+</Tip>
+
+## Context in relation to asset providers
+
+Context files instruct the main agent LLM — they do not affect the asset providers (image, video, audio, reasoning) configured via `OPENGAME_*` environment variables. Those providers are configured separately. See [API keys and provider configuration](/configuration/api-keys) for details.
+
+## Related pages
+
+<CardGroup cols={2}>
+  <Card title="API keys and providers" icon="key" href="/configuration/api-keys">
+    Configure credentials for OpenGame's four generative modalities.
+  </Card>
+  <Card title="Settings file reference" icon="sliders" href="/configuration/settings">
+    Full reference for settings.json, including all context settings.
+  </Card>
+  <Card title="Commands" icon="terminal" href="/features/commands">
+    Full list of slash commands including /memory, /summary, and /theme.
+  </Card>
+  <Card title="Authentication" icon="lock" href="/configuration/auth">
+    Set up the main agent LLM via Qwen OAuth or an OpenAI-compatible key.
+  </Card>
+</CardGroup>

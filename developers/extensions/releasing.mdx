@@ -1,0 +1,192 @@
+---
+title: "Releasing and sharing your OpenGame extension publicly"
+description: "Distribute your extension via a git repository for simplicity or GitHub Releases for faster installs and platform-specific binary support."
+---
+
+Once your extension is working locally, you have two primary distribution channels: a git repository or GitHub Releases. Git repositories are the simplest starting point — anyone can install your extension with a single command and you can manage release channels using branches and tags. GitHub Releases add a faster initial install experience and support platform-specific binaries when your extension ships pre-built native code. This page covers both approaches and explains when to use each.
+
+## Releasing through a git repository
+
+Publishing through a git repository requires no build step. Push your extension directory (including `qwen-extension.json`) to any publicly accessible git host and users can install it immediately.
+
+```bash
+# Install from a full git URL
+opengame extensions install https://github.com/your-org/your-extension
+
+# Shorthand for GitHub repositories
+opengame extensions install your-org/your-extension
+```
+
+Whenever you push new commits to the tracked ref, users who run `opengame extensions update` will receive the update. The HEAD commit is always treated as the latest version, regardless of the `version` field in `qwen-extension.json`.
+
+### Managing release channels
+
+Users can pin to any ref — a branch, a tag, or a specific commit — using the `--ref` flag:
+
+```bash
+# Install from the stable branch
+opengame extensions install your-org/your-extension --ref=stable
+
+# Install a specific tagged release
+opengame extensions install your-org/your-extension --ref=v2.1.0
+
+# Install a specific commit
+opengame extensions install your-org/your-extension --ref=abc1234
+```
+
+This lets you maintain multiple release channels from a single repository. A recommended three-channel setup:
+
+| Channel | Branch | Install command |
+|---------|--------|-----------------|
+| Stable | `main` (default branch) | `opengame extensions install your-org/your-extension` |
+| Preview | `preview` | `opengame extensions install your-org/your-extension --ref=preview` |
+| Dev | `dev` | `opengame extensions install your-org/your-extension --ref=dev` |
+
+### Recommended git branching workflow
+
+Treat your default branch as the stable release branch. Do all active development in a `dev` branch, promote to `preview` when ready for wider testing, and merge `preview` into `main` for a stable release:
+
+```
+dev  →  preview  →  main (stable)
+```
+
+<Tip>
+Avoid cherry-picking between branches if your default branch is your stable branch — force-pushing to the default branch can be blocked by repository settings. Instead, promote entire branches by merging.
+</Tip>
+
+## Releasing through GitHub Releases
+
+GitHub Releases provide a faster and more reliable initial install experience because OpenGame downloads a pre-built archive rather than cloning the full repository. This approach also supports platform-specific binaries when your extension includes compiled native code.
+
+### How it works
+
+When a user installs your extension without specifying a `--ref`, OpenGame fetches the latest GitHub Release (marked as "Latest" in the GitHub UI). When checking for updates, OpenGame compares the installed release tag against the latest release tag.
+
+<Note>
+OpenGame currently uses the latest release only — it does not support pre-release flags or semver range matching. Mark the release you want users to receive as "Latest" in the GitHub Releases UI.
+</Note>
+
+### Archive structure
+
+Every release archive must be fully self-contained. The `qwen-extension.json` manifest must be at the root of the archive, with the rest of the extension laid out exactly as it would be in a local directory:
+
+```
+archive root/
+├── qwen-extension.json   ← must be at root
+├── QWEN.md
+├── server.js
+└── commands/
+    └── deploy.toml
+```
+
+### Platform-specific archives
+
+If your extension ships platform-specific binaries, name each archive according to this convention so OpenGame can auto-select the right one:
+
+```
+{platform}.{arch}.{name}.{extension}
+{platform}.{name}.{extension}
+```
+
+OpenGame searches for a matching asset in this order:
+
+1. Platform + architecture: `darwin.arm64.my-extension.tar.gz`
+2. Platform only: `darwin.my-extension.tar.gz`
+3. Generic fallback: used when only one asset is attached to the release
+
+**Supported platforms:**
+
+| `{platform}` | OS |
+|---|---|
+| `darwin` | macOS |
+| `linux` | Linux |
+| `win32` | Windows |
+
+**Supported architectures:**
+
+| `{arch}` | CPU |
+|---|---|
+| `x64` | 64-bit Intel/AMD |
+| `arm64` | 64-bit ARM (Apple Silicon, AWS Graviton, etc.) |
+
+**Naming examples:**
+
+```
+darwin.arm64.my-extension.tar.gz   # Apple Silicon Mac
+darwin.my-extension.tar.gz        # Any Mac
+linux.x64.my-extension.tar.gz     # 64-bit Linux
+win32.my-extension.zip             # Windows
+```
+
+### Example GitHub Actions workflow
+
+This workflow triggers on any `v*` tag, builds platform-specific archives, and attaches them to a GitHub Release:
+
+```yaml
+name: Release Extension
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '20'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build extension
+        run: npm run build
+
+      - name: Create release assets
+        run: |
+          npm run package -- --platform=darwin --arch=arm64
+          npm run package -- --platform=linux --arch=x64
+          npm run package -- --platform=win32 --arch=x64
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: |
+            release/darwin.arm64.my-extension.tar.gz
+            release/linux.x64.my-extension.tar.gz
+            release/win32.x64.my-extension.zip
+```
+
+<Warning>
+Make sure you mark the release as "Latest" in the GitHub UI (or set `make_latest: true` in the `softprops/action-gh-release` action). OpenGame only fetches the release marked as Latest; pre-releases are ignored.
+</Warning>
+
+## Custom archives for monorepos
+
+If your extension lives inside a larger repository, you can use a custom archive to ship only the extension subdirectory. Build the archive from your extension's subdirectory and attach it to the release as a single generic asset. OpenGame treats a release with exactly one asset as a generic archive regardless of the file name.
+
+## Choosing between git and GitHub Releases
+
+| | Git repository | GitHub Releases |
+|---|---|---|
+| Setup complexity | Low — just push to a public repo | Medium — requires a build/package step |
+| Initial install speed | Slower (full git clone) | Faster (single archive download) |
+| Update mechanism | Push to the tracked branch/tag | Create a new release marked as Latest |
+| Platform binaries | Not supported | Supported via naming convention |
+| Rollbacks | Pin to any commit or tag | Install a specific release with `--ref=tag` |
+| Monorepo support | Limited | Full support via custom archives |
+
+For most extensions — especially those that are pure JavaScript or TOML — a git repository is the simplest and most flexible choice. Use GitHub Releases when your extension has a build step, ships compiled binaries, or you want faster installs for your users.
+
+## Sharing with the community
+
+After publishing, share your extension by:
+
+- Opening a discussion or issue in the [OpenGame repository](https://github.com/leigest519/OpenGame) to request inclusion in the official extension registry
+- Adding a `opengame-extension` topic to your GitHub repository so it is discoverable via search
+- Including a clear `README.md` with installation instructions and a description of what the extension provides

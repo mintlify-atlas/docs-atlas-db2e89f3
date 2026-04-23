@@ -1,0 +1,213 @@
+---
+title: "Web Fetch and Web Search Tools: OpenGame Developer Guide"
+description: "Reference for web_fetch and web_search in OpenGame: fetch URLs, query Tavily, Google, or DashScope, configure providers, and understand security constraints."
+---
+
+OpenGame provides two tools for accessing information on the internet during a game-generation session: `web_fetch` retrieves and processes a specific URL, while `web_search` queries a search engine and returns a concise answer with citations. The agent uses these tools to look up library documentation, check asset licensing, fetch open-source game templates, and research engine-specific APIs — all without leaving the CLI.
+
+## `web_fetch`
+
+`web_fetch` takes a URL and a natural-language prompt, fetches the page content, converts HTML to readable text, and then uses a small, fast model to extract or summarise whatever information the prompt requests. GitHub blob URLs are automatically converted to their raw counterparts, and all HTTP URLs are upgraded to HTTPS.
+
+**Tool name:** `web_fetch` | **Display name:** `WebFetch` | **File:** `web-fetch.ts` | **Confirmation:** Once per URL
+
+### Parameters
+
+<ParamField path="url" type="string" required>
+  The fully-formed URL to fetch. Must begin with `http://` or `https://`. HTTP URLs are automatically upgraded to HTTPS.
+</ParamField>
+
+<ParamField path="prompt" type="string" required>
+  A natural-language description of what information to extract from the fetched page.
+</ParamField>
+
+### Implementation notes
+
+Relevant constants from `packages/core/src/tools/web-fetch.ts`:
+
+```typescript
+const URL_FETCH_TIMEOUT_MS = 10000;   // 10 second fetch timeout
+const MAX_CONTENT_LENGTH   = 100000;  // Maximum content size before truncation
+```
+
+The tool uses `html-to-text` to convert HTML to Markdown before passing content to the model. Private IP ranges are blocked to prevent server-side request forgery (SSRF) attacks.
+
+### Examples
+
+<Tabs>
+  <Tab title="Summarise an article">
+    ```
+    web_fetch(
+      url="https://docs.phaser.io/phaser/concepts/scene",
+      prompt="What is a Phaser Scene and how is the lifecycle structured?"
+    )
+    ```
+  </Tab>
+  <Tab title="Extract installation steps">
+    ```
+    web_fetch(
+      url="https://github.com/photonstorm/phaser/blob/master/README.md",
+      prompt="What are the installation steps and CDN links?"
+    )
+    ```
+  </Tab>
+  <Tab title="Read a paper abstract">
+    ```
+    web_fetch(
+      url="https://arxiv.org/abs/2401.0001",
+      prompt="What are the key findings and methodology described in this paper?"
+    )
+    ```
+  </Tab>
+</Tabs>
+
+### Security considerations
+
+- **SSRF protection:** Private IP addresses and loopback addresses are rejected before any network request is made.
+- **One URL per call:** `web_fetch` processes a single URL per invocation. Make separate calls to analyse multiple URLs.
+- **Content length limit:** Responses larger than 100 000 characters are truncated before being passed to the model.
+- **Confirmation:** The agent asks for your approval the first time it fetches a URL in a session. You can approve once or allowlist the domain for the remainder of the session.
+
+<Info>
+If you have an MCP server that exposes a web fetch tool (its name will begin with `mcp__`), the agent will prefer that tool over the built-in `web_fetch`, as it may have fewer restrictions or additional capabilities.
+</Info>
+
+---
+
+## `web_search`
+
+`web_search` submits a query to a configured search provider and returns a concise answer with numbered source citations. Unlike `web_fetch`, which operates on a known URL, `web_search` is used when the agent needs to discover information it does not already have a URL for.
+
+**Tool name:** `web_search` | **Display name:** `WebSearch` | **File:** `web-search/` | **Confirmation:** No
+
+### Parameters
+
+<ParamField path="query" type="string" required>
+  The search query string.
+</ParamField>
+
+<ParamField path="provider" type="string">
+  The search provider to use: `"dashscope"`, `"tavily"`, or `"google"`. When omitted the default provider from your configuration is used.
+</ParamField>
+
+### Supported providers
+
+<CardGroup cols={3}>
+  <Card title="DashScope" icon="bolt">
+    **Free.** Automatically available for Qwen OAuth users with no configuration required. Quota: 200 requests/minute, 2 000 requests/day.
+  </Card>
+  <Card title="Tavily" icon="search">
+    **Paid (free tier available).** High-quality results with AI-generated answers. Best for research and comprehensive queries with citations.
+  </Card>
+  <Card title="Google Custom Search" icon="globe">
+    **Free tier (100 queries/day).** Google's search quality. Best for factual, specific queries.
+  </Card>
+</CardGroup>
+
+### Configuration
+
+<Tabs>
+  <Tab title="settings.json (recommended)">
+    ```json
+    {
+      "webSearch": {
+        "provider": [
+          { "type": "dashscope" },
+          { "type": "tavily", "apiKey": "tvly-xxxxx" },
+          {
+            "type": "google",
+            "apiKey": "your-google-api-key",
+            "searchEngineId": "your-search-engine-id"
+          }
+        ],
+        "default": "dashscope"
+      }
+    }
+    ```
+
+    - DashScope requires no API key for Qwen OAuth users.
+    - The `default` field controls which provider is used when the agent does not specify one.
+    - If `default` is omitted, priority order is: Tavily > Google > DashScope.
+  </Tab>
+  <Tab title="Environment variables">
+    ```bash
+    # Tavily
+    export TAVILY_API_KEY="tvly-xxxxx"
+
+    # Google
+    export GOOGLE_API_KEY="your-api-key"
+    export GOOGLE_SEARCH_ENGINE_ID="your-engine-id"
+    ```
+  </Tab>
+  <Tab title="CLI flags">
+    ```bash
+    # Tavily
+    opengame --tavily-api-key tvly-xxxxx
+
+    # Google
+    opengame --google-api-key your-key --google-search-engine-id your-id
+
+    # Specify default provider
+    opengame --web-search-default tavily
+    ```
+  </Tab>
+</Tabs>
+
+<Note>
+The legacy `advanced.tavilyApiKey` configuration key is still accepted but deprecated. Migrate to the `webSearch` format shown above.
+</Note>
+
+### Disabling web search
+
+If you want to prevent the agent from using `web_search` entirely, exclude it in `settings.json` and restart the CLI:
+
+```json
+{
+  "tools": {
+    "exclude": ["web_search"]
+  }
+}
+```
+
+### Usage examples
+
+```
+# Using the default provider
+web_search(query="Phaser 3 tilemap best practices")
+
+# Explicitly select a provider
+web_search(query="latest Node.js LTS version", provider="google")
+
+# Research query with citations
+web_search(query="procedural dungeon generation algorithms", provider="tavily")
+```
+
+### Response format
+
+The tool returns a concise answer followed by numbered citations:
+
+```
+Phaser 3 supports tilemaps via the Tilemap and TilemapLayer APIs...
+
+Sources:
+[1] https://docs.phaser.io/phaser/concepts/tilemap
+[2] https://phaser.discourse.group/t/tilemap-tutorial/4521
+```
+
+### Troubleshooting
+
+<AccordionGroup>
+  <Accordion title="Tool not available">
+    - **Qwen OAuth users:** `web_search` with DashScope is registered automatically — no configuration needed.
+    - **Other auth types:** At least one provider (Tavily or Google) must be configured with a valid API key.
+    - Verify that `web_search` is not listed in `tools.exclude`.
+  </Accordion>
+  <Accordion title="Provider-specific errors">
+    - Use the `provider` parameter to switch to a different provider for the current query.
+    - Check API quotas and rate limits in the provider's dashboard.
+    - Verify that API keys are correctly set in `settings.json` or environment variables.
+  </Accordion>
+  <Accordion title="Checking current configuration">
+    Run `opengame` and use the in-app settings dialog to inspect the current web search configuration. Settings are stored in `~/.qwen-code/settings.json` (macOS/Linux) or `%USERPROFILE%\.qwen-code\settings.json` (Windows).
+  </Accordion>
+</AccordionGroup>

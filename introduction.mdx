@@ -1,0 +1,102 @@
+---
+title: "OpenGame: Agentic Web Game Creation from a Prompt"
+description: "OpenGame is an open-source CLI that turns a natural-language prompt into a fully playable web game — planning, code generation, and debugging all included."
+---
+
+OpenGame is an open-source agentic framework that lives in your terminal. You describe a game in plain language — a Snake clone, a tower defense, a side-scrolling platformer — and OpenGame plans the architecture, picks the right engine, scaffolds the project, writes the code, runs it in a sandboxed browser, and iteratively debugs it until it is fully playable. No boilerplate, no engine configuration, no manual debugging loop: just a prompt and a working game.
+
+<CardGroup cols={2}>
+  <Card title="Quickstart" icon="rocket" href="/quickstart">
+    Install OpenGame and generate your first playable web game in minutes
+  </Card>
+  <Card title="Game Skill" icon="gamepad" href="/game-skill">
+    Learn how Template Skill and Debug Skill power end-to-end game creation
+  </Card>
+  <Card title="API keys" icon="key" href="/configuration/api-keys">
+    Configure image, video, audio, and reasoning providers
+  </Card>
+  <Card title="TypeScript SDK" icon="code" href="/developers/sdk-typescript">
+    Integrate OpenGame programmatically into your own tools
+  </Card>
+</CardGroup>
+
+## What OpenGame does
+
+Game development sits at the intersection of creative design and intricate software engineering. Large Language Models can write plausible-looking game code, but they consistently fail to produce a *fully playable* game — cross-file inconsistencies, broken scene wiring, and missing state transitions all compound into something that looks right but does not run correctly. OpenGame is built specifically to solve this.
+
+When you send a prompt, OpenGame:
+
+1. **Plans the architecture** — engine choice, file layout, game-loop structure, and state management.
+2. **Scaffolds the project** using **Template Skill**, which selects a proven project skeleton for the target engine (HTML5 canvas, Phaser, or three.js) so every subsequent edit stays coherent.
+3. **Writes the code** across all necessary files, wiring scenes, assets, and logic together.
+4. **Runs the game in a sandbox** and uses **Debug Skill** to catch integration errors, broken interactions, and missing assets — then systematically fixes them until the game is playable end-to-end.
+
+## Key capabilities
+
+<CardGroup cols={2}>
+  <Card title="Prompt to playable game" icon="wand-magic-sparkles" href="/quickstart">
+    Describe a game in plain language and receive a working, browser-playable result
+  </Card>
+  <Card title="Game Skill" icon="screwdriver-wrench" href="/game-skill">
+    A reusable two-part capability that scaffolds stable projects and fixes integration errors
+  </Card>
+  <Card title="Headless and scriptable" icon="terminal" href="/features/headless">
+    Run `opengame -p "..."` for CI pipelines, batch generation, and benchmark automation
+  </Card>
+  <Card title="Interactive iteration" icon="comments" href="/quickstart">
+    Keep chatting to add features, fix bugs, or change the art style after the first generation
+  </Card>
+  <Card title="Flexible model support" icon="microchip" href="/configuration/api-keys">
+    Works with any OpenAI-compatible API; swap in GameCoder-27B for maximum accuracy
+  </Card>
+  <Card title="Sandboxed execution" icon="box" href="/features/sandbox">
+    Shell commands and file operations run in isolated Docker, Podman, or Seatbelt environments
+  </Card>
+</CardGroup>
+
+## Game Skill
+
+At the heart of OpenGame is **Game Skill**, a reusable agent capability composed of two complementary parts:
+
+**Template Skill** maintains a growing library of project skeletons drawn from successful past generations. When you describe a game, Template Skill picks the most appropriate skeleton — canvas for simple 2D games, Phaser for games that need a full physics and sprite pipeline, three.js for 3D scenes — and scaffolds a conventional, stable project structure. This ensures the agent starts from a sound foundation rather than inventing a new layout for every generation.
+
+**Debug Skill** runs the generated game in a headless sandbox and maintains a living protocol of verified fixes. When the game fails to start, throws a console error, or breaks an interaction, Debug Skill matches the error against its knowledge base, applies a targeted fix, re-runs the game, and repeats until the game is fully playable. This systematic loop is what separates OpenGame from a one-shot code generator.
+
+Together, Template Skill and Debug Skill let the agent move from "writes plausible game code" to "ships a working, playable game."
+
+<Note>
+  Read the [Game Skill](/game-skill) page for a deeper look at how Template Skill and Debug Skill work together, including the supported engines and the full prompt-to-game flow.
+</Note>
+
+## GameCoder-27B
+
+**GameCoder-27B** is a code LLM purpose-built for OpenGame. It is trained in three stages:
+
+1. **Continual pre-training** on game engine documentation, API references, and open-source game codebases.
+2. **Supervised fine-tuning (SFT)** on curated game-development trajectories covering engine APIs, project scaffolding, and bug-fix workflows.
+3. **Execution-grounded reinforcement learning** with reward signals derived from real game playability, using OpenGame-Bench-style verifiers.
+
+You can use GameCoder-27B by pointing `OPENAI_BASE_URL` to a local deployment, or use any other OpenAI-compatible model as the agent backend.
+
+## OpenGame-Bench
+
+**OpenGame-Bench** is an evaluation pipeline for agents that build interactive web games. Unlike static code-evaluation benchmarks, it dynamically launches generated games, drives them with scripted interactions, and scores them along three dimensions:
+
+- **Build health** — does the game start without errors?
+- **Visual usability** — is the UI rendered and interactive?
+- **Intent alignment** — does the game match the original prompt's described mechanics?
+
+Across 150 diverse game prompts, OpenGame establishes a new state-of-the-art on this benchmark. The evaluation pipeline will be released as open-source soon.
+
+## Who OpenGame is for
+
+OpenGame is designed for developers and researchers who want to generate complete, playable web games from natural-language descriptions. It is particularly useful for:
+
+- **Game prototypers** who want to go from concept to interactive prototype in minutes.
+- **Educators and content creators** who need custom mini-games for teaching or interactive experiences.
+- **Researchers** evaluating the frontier of agentic code generation on complex, multi-file, interactive targets.
+- **Developers** who want to integrate agentic game generation into CI pipelines or batch workflows via headless mode.
+
+<Tip>
+  OpenGame is built on top of [qwen-code](https://github.com/QwenLM/qwen-code), which is itself based on Google Gemini CLI. Features like Plan Mode, SubAgents, MCP, and the TypeScript SDK all come from that lineage and work in OpenGame.
+</Tip>

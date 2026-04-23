@@ -1,0 +1,178 @@
+---
+title: "Game Skill: How OpenGame Ships Working Games End-to-End"
+description: "Game Skill powers OpenGame's end-to-end generation: Template Skill scaffolds the project with the right engine, Debug Skill iterates until the game is fully playable."
+---
+
+Most code agents can write plausible-looking game code. What they struggle with is producing a *playable* game — one that starts without errors, responds to input, progresses through its game loop, and handles win and loss conditions correctly. The gap lies not in writing individual functions but in managing the cross-file consistency, scene wiring, and runtime integration that a working game demands.
+
+**Game Skill** is OpenGame's answer. It is a reusable, evolving agent capability composed of two complementary parts — **Template Skill** and **Debug Skill** — that together take an agent from "writes plausible code" to "ships a working game."
+
+## Template Skill
+
+Template Skill is responsible for the first half of game generation: picking the right engine and scaffolding a stable project structure before any game logic is written.
+
+### What it does
+
+When you send a game prompt, Template Skill analyzes the description and selects the most appropriate project skeleton from a growing library of templates. It then scaffolds the full project structure — directory layout, entry points, configuration files, and boilerplate — so that every file the agent writes afterward lands in a coherent, conventional location.
+
+This matters because cross-file consistency is the single most common failure mode in LLM game generation. If the agent invents a new project layout for each generation, references between files drift, imports break, and the game fails to start. Template Skill eliminates this class of error by establishing the layout before any game-specific code is written.
+
+### Supported engines
+
+<CardGroup cols={3}>
+  <Card title="HTML5 Canvas" icon="square" href="/game-skill">
+    Pure browser APIs — no external dependencies. Best for simple 2D arcade games, puzzle games, and projects that need zero install friction.
+  </Card>
+  <Card title="Phaser" icon="gamepad" href="/game-skill">
+    A full-featured HTML5 game framework with a physics engine, sprite management, scene graph, and input handling. Best for platformers, shooters, and games with complex state.
+  </Card>
+  <Card title="three.js" icon="cube" href="/game-skill">
+    A WebGL-based 3D rendering library. Best for first-person games, top-down 3D scenes, and any game that needs perspective rendering or 3D models.
+  </Card>
+</CardGroup>
+
+### How the engine is selected
+
+Template Skill maps prompt keywords and described mechanics to the engine best suited for them:
+
+- Prompts describing physics, sprites, platforming, or shooting typically resolve to **Phaser**.
+- Prompts describing 3D environments, first-person views, or three-dimensional movement resolve to **three.js**.
+- Prompts describing simple 2D mechanics, grid games, or explicitly requesting no external libraries resolve to **HTML5 canvas**.
+
+You can override the automatic selection by specifying the engine in your prompt:
+
+```
+Use Phaser 3 for this.
+```
+
+```
+Plain HTML5 canvas, no external libraries.
+```
+
+```
+Use three.js for a 3D first-person view.
+```
+
+### The template library grows over time
+
+Template Skill maintains a library of project skeletons that expands with experience. Successful game generations contribute new or refined templates back to the library, so the agent's starting point improves over time. This is what makes Game Skill *reusable* and *evolving* rather than a one-shot scaffolding step.
+
+<Note>
+  The template library lives in `agent-test/templates/` in the OpenGame repository. When running games from an arbitrary directory, set `GAME_TEMPLATES_DIR` to the absolute path of this folder so the agent can locate the skeletons.
+</Note>
+
+## Debug Skill
+
+Debug Skill handles the second half of game generation: running the scaffolded, code-filled game in a sandbox and systematically resolving every error until the game is fully playable.
+
+### What it does
+
+After Template Skill scaffolds the project and the agent writes the game code, Debug Skill takes over:
+
+1. **Runs the game in a headless browser sandbox** — launches the generated `index.html` in an isolated environment that mirrors what a real user would see.
+2. **Captures all signals** — console errors, uncaught exceptions, failed network requests, rendering failures, and broken interactions.
+3. **Matches errors to fixes** — consults a living protocol of verified fixes accumulated from past game generations. Known error patterns have known solutions; the agent applies them directly.
+4. **Applies targeted repairs** — edits only the files relevant to the error rather than regenerating the whole project. This keeps the fix scope narrow and the rest of the game stable.
+5. **Re-runs and verifies** — after each fix, Debug Skill runs the game again to confirm the error is resolved and no new errors were introduced.
+6. **Repeats until playable** — the loop continues until the game starts cleanly, all interactions work, and the game loop progresses correctly.
+
+### The verified fix protocol
+
+The most important property of Debug Skill is that its fixes are *verified*. When a fix resolves an error in a real game run, that fix is added to the protocol. Future generations facing the same error pattern apply the same verified fix rather than asking the LLM to reason about it from scratch. This is why Debug Skill resolves integration errors *systematically* rather than *speculatively*.
+
+<Tip>
+  The distinction between Template Skill and Debug Skill maps directly to the two ways games break: they fail to start (scaffolding errors, caught by Template Skill's stable layout) or they start but behave incorrectly (integration and runtime errors, caught by Debug Skill's sandbox loop).
+</Tip>
+
+### What Debug Skill catches
+
+<AccordionGroup>
+  <Accordion title="Build and start errors">
+    Missing dependencies, incorrect import paths, syntax errors in configuration files, and engine initialization failures that prevent the game from loading at all.
+  </Accordion>
+  <Accordion title="Runtime and console errors">
+    Uncaught JavaScript exceptions, null-reference errors when accessing game objects, failed asset loads (missing images, audio files, or sprite sheets), and WebGL context errors.
+  </Accordion>
+  <Accordion title="Interaction failures">
+    Input handlers that are wired to the wrong events, collision detection that fires on the wrong objects, game-state transitions that never trigger, and win/loss conditions that are never reached.
+  </Accordion>
+  <Accordion title="Visual and rendering issues">
+    Sprites rendering off-screen, layers in the wrong z-order, canvas dimensions mismatched to the viewport, and animations that play at the wrong speed.
+  </Accordion>
+</AccordionGroup>
+
+## The full flow: prompt to playable game
+
+This is the complete sequence from the moment you send a prompt to the moment a playable game is in your browser:
+
+<Steps>
+  <Step title="Prompt analysis">
+    OpenGame parses your prompt to extract the game genre, mechanics, controls, art style, engine preference (if stated), and any specific features you described. This analysis drives every decision that follows.
+  </Step>
+
+  <Step title="Template selection (Template Skill)">
+    Template Skill selects the project skeleton that best matches the analyzed prompt. The skeleton determines the file layout, engine version, entry-point structure, and build configuration.
+  </Step>
+
+  <Step title="Project scaffolding (Template Skill)">
+    The selected template is instantiated in your game folder. The agent now has a conventional, stable foundation to build on — `index.html`, the main game file, scene files, and any engine-specific configuration are all in place.
+  </Step>
+
+  <Step title="Code generation">
+    The agent writes the game-specific code: player logic, enemy behavior, collision handling, scoring, UI, and any mechanics you described. Because the project structure is already established, the agent focuses entirely on game logic rather than layout decisions.
+  </Step>
+
+  <Step title="Sandbox execution (Debug Skill)">
+    Debug Skill launches the game in a headless browser. If the game loads and runs correctly, the generation is complete. If any error is detected, Debug Skill captures it and moves to the next step.
+  </Step>
+
+  <Step title="Error diagnosis and repair (Debug Skill)">
+    Debug Skill matches the captured error against its verified fix protocol. If a known fix exists, it is applied directly. If not, the agent reasons about the error and generates a targeted repair, which — if successful — is added to the protocol for future generations.
+  </Step>
+
+  <Step title="Verification and iteration (Debug Skill)">
+    The game is re-run after each fix. The cycle repeats until the game starts cleanly, all interactions work, and the game loop progresses from start to win or loss. At that point, Debug Skill signals completion.
+  </Step>
+
+  <Step title="Playable game delivered">
+    OpenGame prints the local URL or `index.html` path. Open it in your browser to play. The session remains open for iterative changes — describe what you want to adjust, and OpenGame edits and re-verifies.
+  </Step>
+</Steps>
+
+## Game Skill and GameCoder-27B
+
+Game Skill is a framework capability — it works with any OpenAI-compatible model. However, it is designed to pair with **GameCoder-27B**, a code LLM purpose-trained on game engine APIs, project scaffolding patterns, and bug-fix trajectories. When running GameCoder-27B locally, Template Skill's engine selection and Debug Skill's error reasoning both benefit from a model that deeply understands game development idioms.
+
+To use GameCoder-27B, point the agent at a local deployment:
+
+```bash
+export OPENAI_BASE_URL="http://localhost:8000/v1"
+export OPENAI_MODEL="GameCoder-27B"
+```
+
+See [API keys](/configuration/api-keys) for the full model configuration reference.
+
+## Game Skill in headless mode
+
+Game Skill runs identically in headless mode — the same Template Skill selection, scaffolding, code generation, and Debug Skill loop happen whether you are in an interactive session or driving OpenGame from a script:
+
+```bash
+opengame -p "Build a tower defense game with 3 enemy types and 5 waves." --yolo
+```
+
+This makes Game Skill suitable for batch generation pipelines and benchmark runs like OpenGame-Bench, which evaluates agent-generated games along build health, visual usability, and intent alignment dimensions.
+
+<CardGroup cols={2}>
+  <Card title="Quickstart" icon="rocket" href="/quickstart">
+    Install OpenGame and generate your first game end-to-end
+  </Card>
+  <Card title="Headless mode" icon="terminal" href="/features/headless">
+    Run Game Skill in scripts, CI, and batch generation workflows
+  </Card>
+  <Card title="Configuration" icon="key" href="/configuration/api-keys">
+    Configure GameCoder-27B and asset providers
+  </Card>
+  <Card title="TypeScript SDK" icon="code" href="/developers/sdk-typescript">
+    Access Game Skill programmatically via the OpenGame SDK
+  </Card>
+</CardGroup>

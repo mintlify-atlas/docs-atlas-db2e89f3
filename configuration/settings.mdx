@@ -1,0 +1,322 @@
+---
+title: "Settings File Reference: OpenGame Configuration"
+description: "Complete reference for OpenGame's settings.json. Covers 7 configuration layers, file locations, and all settings: general, model, context, tools, MCP, and security."
+---
+
+OpenGame reads configuration from multiple sources and merges them in a well-defined order of precedence. Most day-to-day tuning lives in a `settings.json` file — a plain JSON file with a nested structure that you can place at the user level, project level, or system level. Understanding where these files live and how they interact helps you set sensible defaults globally while still being able to override them per-project or per-session.
+
+## Configuration layers
+
+Settings are applied in the following order. A source with a higher level number wins over a lower one:
+
+| Level | Source | Description |
+|---|---|---|
+| 1 | Default values | Hardcoded defaults within the application |
+| 2 | System defaults file | System-wide defaults that other files can override |
+| 3 | User settings file | Global settings for the current user (`~/.qwen/settings.json`) |
+| 4 | Project settings file | Project-specific settings (`.qwen/settings.json` in project root) |
+| 5 | System settings file | System-wide settings that override all file-based settings |
+| 6 | Environment variables | Shell or `.env` file variables |
+| 7 | Command-line arguments | Values passed when launching the CLI |
+
+## Settings file locations
+
+<AccordionGroup>
+  <Accordion title="User settings file — ~/.qwen/settings.json">
+    Applies to all OpenGame sessions for the current user. This is the most common place to put personal preferences such as your preferred theme, Vim mode, or model defaults.
+  </Accordion>
+  <Accordion title="Project settings file — .qwen/settings.json">
+    Applies only when running OpenGame from that specific project directory. Project settings override user settings and are the right place for team-shared conventions — approval mode, context file name, allowed tools.
+  </Accordion>
+  <Accordion title="System settings file">
+    - **Linux:** `/etc/qwen-code/settings.json` (override with `QWEN_CODE_SYSTEM_SETTINGS_PATH`)
+    - **macOS:** `/Library/Application Support/QwenCode/settings.json`
+    - **Windows:** `C:\ProgramData\qwen-code\settings.json`
+
+    Applies to all users on the system. Useful for enterprise administrators who need to enforce a consistent baseline configuration.
+  </Accordion>
+  <Accordion title="System defaults file">
+    - **Linux:** `/etc/qwen-code/system-defaults.json` (override with `QWEN_CODE_SYSTEM_DEFAULTS_PATH`)
+    - **macOS:** `/Library/Application Support/QwenCode/system-defaults.json`
+    - **Windows:** `C:\ProgramData\qwen-code\system-defaults.json`
+
+    Provides a base layer of defaults with the lowest precedence. Intended to be overridden by all other sources.
+  </Accordion>
+</AccordionGroup>
+
+<Tip>
+  String values in any `settings.json` file can reference environment variables using `$VAR_NAME` or `${VAR_NAME}` syntax. For example: `"apiKey": "$MY_API_TOKEN"`. Variables are resolved when the settings file is loaded.
+</Tip>
+
+The `.qwen/` directory in your project can also hold other OpenGame-specific files:
+
+- Custom sandbox profiles (`.qwen/sandbox-macos-custom.sb`, `.qwen/sandbox.Dockerfile`)
+- Agent Skills (experimental) under `.qwen/skills/` — each skill is a directory containing a `SKILL.md`
+
+## Settings reference
+
+### general
+
+| Setting | Type | Description | Default |
+|---|---|---|---|
+| `general.preferredEditor` | string | Preferred editor to open files in | `undefined` |
+| `general.vimMode` | boolean | Enable Vim keybindings | `false` |
+| `general.disableAutoUpdate` | boolean | Disable automatic updates | `false` |
+| `general.disableUpdateNag` | boolean | Disable update notification prompts | `false` |
+| `general.gitCoAuthor` | boolean | Add a `Co-authored-by` trailer to git commits made through OpenGame | `true` |
+| `general.checkpointing.enabled` | boolean | Enable session checkpointing for recovery | `false` |
+
+### output
+
+| Setting | Type | Description | Default | Values |
+|---|---|---|---|---|
+| `output.format` | string | Format of CLI output | `"text"` | `"text"`, `"json"` |
+
+### ui
+
+| Setting | Type | Description | Default |
+|---|---|---|---|
+| `ui.theme` | string | Color theme for the UI. See `/theme` command for available options | `undefined` |
+| `ui.customThemes` | object | Custom theme definitions | `{}` |
+| `ui.hideWindowTitle` | boolean | Hide the window title bar | `false` |
+| `ui.hideTips` | boolean | Hide helpful tips in the UI | `false` |
+| `ui.hideBanner` | boolean | Hide the application banner | `false` |
+| `ui.hideFooter` | boolean | Hide the footer from the UI | `false` |
+| `ui.showMemoryUsage` | boolean | Display memory usage in the UI | `false` |
+| `ui.showLineNumbers` | boolean | Show line numbers in code blocks | `true` |
+| `ui.showCitations` | boolean | Show citations for generated text | `true` |
+| `ui.enableWelcomeBack` | boolean | Show a welcome-back dialog when returning to a project with conversation history. Integrates with the `/summary` command | `true` |
+| `ui.accessibility.disableLoadingPhrases` | boolean | Disable loading phrases for accessibility | `false` |
+| `ui.accessibility.screenReader` | boolean | Adjust the TUI for better screen reader compatibility | `false` |
+| `ui.customWittyPhrases` | array of strings | Custom phrases to cycle through during loading states | `[]` |
+
+### ide
+
+| Setting | Type | Description | Default |
+|---|---|---|---|
+| `ide.enabled` | boolean | Enable IDE integration mode | `false` |
+| `ide.hasSeenNudge` | boolean | Whether the user has seen the IDE integration nudge | `false` |
+
+### privacy
+
+| Setting | Type | Description | Default |
+|---|---|---|---|
+| `privacy.usageStatisticsEnabled` | boolean | Enable collection of anonymized usage statistics | `true` |
+
+### model
+
+| Setting | Type | Description | Default |
+|---|---|---|---|
+| `model.name` | string | The Qwen model to use for conversations | `undefined` |
+| `model.maxSessionTurns` | number | Maximum user/model/tool turns per session. `-1` means unlimited | `-1` |
+| `model.summarizeToolOutput` | object | Enable summarization of tool output. Specify a `tokenBudget` per tool. Currently only `run_shell_command` is supported | `undefined` |
+| `model.generationConfig` | object | Advanced overrides passed to the content generator: `timeout`, `maxRetries`, `disableCacheControl`, and `samplingParams` (`temperature`, `top_p`, `max_tokens`) | `undefined` |
+| `model.chatCompression.contextPercentageThreshold` | number | Trigger compression when chat history exceeds this fraction of the model's token limit. `0` disables compression | `0.7` |
+| `model.skipNextSpeakerCheck` | boolean | Skip the next-speaker check | `false` |
+| `model.skipLoopDetection` | boolean | Disable loop detection. Enable if you get frequent false-positive loop interruptions | `false` |
+| `model.skipStartupContext` | boolean | Skip sending the startup workspace context at the beginning of each session | `false` |
+| `model.enableOpenAILogging` | boolean | Log OpenAI API requests and responses to JSON files | `false` |
+| `model.openAILoggingDir` | string | Directory for OpenAI API logs. Supports `~`, relative, and absolute paths. Defaults to `logs/openai` in the current directory | `undefined` |
+
+**Example `model.generationConfig`:**
+
+```json settings.json
+{
+  "model": {
+    "generationConfig": {
+      "timeout": 60000,
+      "disableCacheControl": false,
+      "samplingParams": {
+        "temperature": 0.2,
+        "top_p": 0.8,
+        "max_tokens": 1024
+      }
+    }
+  }
+}
+```
+
+### context
+
+| Setting | Type | Description | Default |
+|---|---|---|---|
+| `context.fileName` | string or array | Name(s) of the context file(s) to load (e.g. `QWEN.md`) | `undefined` |
+| `context.importFormat` | string | Format to use when importing memory | `undefined` |
+| `context.discoveryMaxDirs` | number | Maximum number of directories to search for context files | `200` |
+| `context.includeDirectories` | array | Additional absolute or relative paths to include in workspace context. Supports `~`. Missing directories are skipped with a warning | `[]` |
+| `context.loadFromIncludeDirectories` | boolean | If `true`, `/memory refresh` also loads context files from all `includeDirectories` | `false` |
+| `context.fileFiltering.respectGitIgnore` | boolean | Respect `.gitignore` files when searching | `true` |
+| `context.fileFiltering.respectQwenIgnore` | boolean | Respect `.qwenignore` files when searching | `true` |
+| `context.fileFiltering.enableRecursiveFileSearch` | boolean | Recursively search for filenames when completing `@` prefixes | `true` |
+| `context.fileFiltering.disableFuzzySearch` | boolean | Disable fuzzy search for file completion. Can improve performance on large projects | `false` |
+
+<Tip>
+  If `@` file completions are slow, try these steps in order: (1) Add a `.qwenignore` to exclude large directories like `node_modules` or build artifacts. (2) Set `context.fileFiltering.disableFuzzySearch` to `true`. (3) As a last resort, disable recursive search entirely with `context.fileFiltering.enableRecursiveFileSearch: false`.
+</Tip>
+
+### tools
+
+| Setting | Type | Description | Default |
+|---|---|---|---|
+| `tools.sandbox` | boolean or string | Sandbox execution environment | `undefined` |
+| `tools.shell.enableInteractiveShell` | boolean | Use `node-pty` for an interactive shell (falls back to `child_process`) | `false` |
+| `tools.core` | array of strings | Allowlist of built-in tools. Supports command-specific restrictions, e.g. `"run_shell_command(ls -l)"` | `undefined` |
+| `tools.exclude` | array of strings | Tool names to exclude from discovery. Supports command-specific restrictions, e.g. `"run_shell_command(rm -rf)"` | `undefined` |
+| `tools.allowed` | array of strings | Tools that bypass the confirmation dialog, e.g. `["run_shell_command(git)", "run_shell_command(npm test)"]` | `undefined` |
+| `tools.approvalMode` | string | Default approval mode: `plan`, `default`, `auto-edit`, or `yolo` | `"default"` |
+| `tools.discoveryCommand` | string | Command to run for tool discovery | `undefined` |
+| `tools.callCommand` | string | Custom shell command for calling a discovered tool. Reads JSON args on stdin, writes JSON result to stdout | `undefined` |
+| `tools.useRipgrep` | boolean | Use ripgrep for file content search | `true` |
+| `tools.useBuiltinRipgrep` | boolean | Use the bundled ripgrep binary. When `false`, uses the system `rg` command | `true` |
+| `tools.enableToolOutputTruncation` | boolean | Enable truncation of large tool outputs (requires restart) | `true` |
+| `tools.truncateToolOutputThreshold` | number | Truncate tool output exceeding this many characters (requires restart) | `25000` |
+| `tools.truncateToolOutputLines` | number | Maximum lines to keep when truncating (requires restart) | `1000` |
+| `tools.autoAccept` | boolean | Automatically accept tool calls considered safe (read-only operations) without explicit confirmation | `false` |
+
+<Warning>
+  Command-specific restrictions in `tools.exclude` use simple string matching and can be bypassed. Do not rely on `tools.exclude` as a security mechanism for untrusted code. Use `tools.core` to explicitly allowlist commands instead.
+</Warning>
+
+### mcp
+
+| Setting | Type | Description | Default |
+|---|---|---|---|
+| `mcp.serverCommand` | string | Command to start an MCP server | `undefined` |
+| `mcp.allowed` | array of strings | Allowlist of MCP server names to make available to the model | `undefined` |
+| `mcp.excluded` | array of strings | Denylist of MCP server names. A server in both `mcp.allowed` and `mcp.excluded` is excluded | `undefined` |
+
+### security
+
+| Setting | Type | Description | Default |
+|---|---|---|---|
+| `security.folderTrust.enabled` | boolean | Enable the Trusted Folders security feature | `false` |
+| `security.auth.selectedType` | string | Currently selected authentication type | `undefined` |
+| `security.auth.enforcedType` | string | Required auth type (useful for enterprise enforcement) | `undefined` |
+| `security.auth.useExternal` | boolean | Whether to use an external authentication flow | `undefined` |
+
+### advanced
+
+| Setting | Type | Description | Default |
+|---|---|---|---|
+| `advanced.autoConfigureMemory` | boolean | Automatically configure Node.js memory limits | `false` |
+| `advanced.dnsResolutionOrder` | string | DNS resolution order | `undefined` |
+| `advanced.excludedEnvVars` | array of strings | Environment variables to exclude from project `.env` files. Variables from `.qwen/.env` are never excluded | `["DEBUG","DEBUG_MODE"]` |
+| `advanced.bugCommand` | object | Override the default URL for the `/bug` command. Use `urlTemplate` with `{title}` and `{info}` placeholders | `undefined` |
+| `advanced.tavilyApiKey` | string | API key for Tavily web search (enables the `web_search` tool). Legacy format — prefer the `TAVILY_API_KEY` env var | `undefined` |
+
+### telemetry
+
+| Setting | Type | Description |
+|---|---|---|
+| `telemetry.enabled` | boolean | Whether telemetry is enabled |
+| `telemetry.target` | string | Destination for collected telemetry: `local` or `gcp` |
+| `telemetry.otlpEndpoint` | string | Endpoint for the OTLP Exporter |
+| `telemetry.otlpProtocol` | string | Protocol for the OTLP Exporter: `grpc` or `http` |
+| `telemetry.logPrompts` | boolean | Whether to include user prompt content in logs |
+| `telemetry.outfile` | string | File to write telemetry to when target is `local` |
+| `telemetry.useCollector` | boolean | Whether to use an external OTLP collector |
+
+### mcpServers
+
+`mcpServers` configures connections to one or more Model-Context Protocol servers for discovering and using custom tools. If multiple servers expose a tool with the same name, the tool is prefixed with the server alias (e.g., `serverAlias__toolName`).
+
+At least one of `command`, `url`, or `httpUrl` must be provided. When multiple are specified, precedence is: `httpUrl` > `url` > `command`.
+
+| Property | Type | Description | Optional |
+|---|---|---|---|
+| `mcpServers.<NAME>.command` | string | Command to start the server via stdio | Yes |
+| `mcpServers.<NAME>.args` | array of strings | Arguments for the command | Yes |
+| `mcpServers.<NAME>.env` | object | Environment variables for the server process | Yes |
+| `mcpServers.<NAME>.cwd` | string | Working directory to start the server in | Yes |
+| `mcpServers.<NAME>.url` | string | URL of an SSE-based MCP server | Yes |
+| `mcpServers.<NAME>.httpUrl` | string | URL of a streamable HTTP MCP server | Yes |
+| `mcpServers.<NAME>.headers` | object | HTTP headers to send with requests to `url` or `httpUrl` | Yes |
+| `mcpServers.<NAME>.timeout` | number | Timeout in milliseconds for requests to this server | Yes |
+| `mcpServers.<NAME>.trust` | boolean | Trust this server and bypass all tool call confirmations | Yes |
+| `mcpServers.<NAME>.description` | string | Brief description of the server for display purposes | Yes |
+| `mcpServers.<NAME>.includeTools` | array of strings | Allowlist of tool names to expose from this server | Yes |
+| `mcpServers.<NAME>.excludeTools` | array of strings | Denylist of tool names. Takes precedence over `includeTools` | Yes |
+
+## Complete settings.json example
+
+```json ~/.qwen/settings.json
+{
+  "general": {
+    "vimMode": true,
+    "preferredEditor": "code"
+  },
+  "ui": {
+    "theme": "GitHub",
+    "hideBanner": true,
+    "hideTips": false,
+    "customWittyPhrases": [
+      "You forget a thousand things every day. Make sure this is one of 'em",
+      "Connecting to AGI"
+    ]
+  },
+  "tools": {
+    "approvalMode": "yolo",
+    "sandbox": "docker",
+    "discoveryCommand": "bin/get_tools",
+    "callCommand": "bin/call_tool",
+    "exclude": ["write_file"]
+  },
+  "mcpServers": {
+    "mainServer": {
+      "command": "bin/mcp_server.py"
+    },
+    "anotherServer": {
+      "command": "node",
+      "args": ["mcp_server.js", "--verbose"]
+    }
+  },
+  "telemetry": {
+    "enabled": true,
+    "target": "local",
+    "otlpEndpoint": "http://localhost:4317",
+    "logPrompts": true
+  },
+  "privacy": {
+    "usageStatisticsEnabled": true
+  },
+  "model": {
+    "name": "qwen3-coder-plus",
+    "maxSessionTurns": 10,
+    "enableOpenAILogging": false,
+    "openAILoggingDir": "~/qwen-logs",
+    "summarizeToolOutput": {
+      "run_shell_command": {
+        "tokenBudget": 100
+      }
+    }
+  },
+  "context": {
+    "fileName": ["CONTEXT.md", "QWEN.md"],
+    "includeDirectories": ["path/to/dir1", "~/path/to/dir2", "../path/to/dir3"],
+    "loadFromIncludeDirectories": true,
+    "fileFiltering": {
+      "respectGitIgnore": false
+    }
+  },
+  "advanced": {
+    "excludedEnvVars": ["DEBUG", "DEBUG_MODE", "NODE_ENV"]
+  }
+}
+```
+
+## Related pages
+
+<CardGroup cols={2}>
+  <Card title="API keys and providers" icon="key" href="/configuration/api-keys">
+    Configure credentials for OpenGame's four generative modalities.
+  </Card>
+  <Card title="Authentication" icon="lock" href="/configuration/auth">
+    Set up the main agent LLM via Qwen OAuth or an OpenAI-compatible key.
+  </Card>
+  <Card title="Memory and context" icon="brain" href="/configuration/memory">
+    Manage QWEN.md context files, the /memory command, and .qwenignore.
+  </Card>
+  <Card title="MCP integration" icon="plug" href="/features/mcp">
+    Connect custom tools via the Model-Context Protocol.
+  </Card>
+</CardGroup>

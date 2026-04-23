@@ -1,0 +1,289 @@
+---
+title: 'OpenGame CLI Commands: Slash, @, !, and Custom Commands'
+description: 'Complete reference for all OpenGame commands — slash commands for session control, @ for file injection, ! for shell execution, and custom TOML commands.'
+---
+
+OpenGame exposes three built-in command types through simple prefixes, plus a custom command system for building your own reusable prompts. Commands are entered directly in the chat input — no separate CLI mode needed.
+
+| Prefix | Purpose | Example |
+| --- | --- | --- |
+| `/` | Control OpenGame's session, settings, and tools | `/approval-mode auto-edit` |
+| `@` | Inject local file or directory content into the conversation | `@src/auth.py explain this` |
+| `!` | Execute a shell command and see the output | `!git status` |
+| Custom `/` | Run a saved TOML prompt as a slash command | `/git:commit` |
+
+---
+
+## Slash commands (`/`)
+
+Slash commands are the primary control surface for managing sessions, switching modes, and interacting with OpenGame's configuration.
+
+### Session and project management
+
+| Command | Description | Example |
+| --- | --- | --- |
+| `/init` | Analyze the current directory and create an initial context file | `/init` |
+| `/summary` | Generate a project summary from conversation history | `/summary` |
+| `/compress` | Replace chat history with a summary to reduce token usage | `/compress` |
+| `/resume` | Resume a previous conversation session | `/resume` |
+| `/restore` | Restore files to their state before a tool execution | `/restore` or `/restore <ID>` |
+
+### Interface and workspace control
+
+| Command | Description | Example |
+| --- | --- | --- |
+| `/clear` | Clear the terminal screen | `/clear` (also `Ctrl+L`) |
+| `/theme` | Change the visual theme | `/theme` |
+| `/vim` | Toggle Vim keybindings in the input area | `/vim` |
+| `/directory` | Manage multi-directory workspace support | `/directory add ./src,./tests` |
+| `/editor` | Open the editor selection dialog | `/editor` |
+
+### Language settings
+
+| Command | Description | Example |
+| --- | --- | --- |
+| `/language` | View or change language settings | `/language` |
+| `/language ui [lang]` | Set the UI interface language | `/language ui zh-CN` |
+| `/language output [lang]` | Set the model's output language | `/language output Chinese` |
+
+Available built-in UI languages: `zh-CN`, `en-US`, `ru-RU`, `de-DE`. Output language accepts any natural language name (`Chinese`, `English`, `Japanese`, etc.).
+
+### Tool and model management
+
+| Command | Arguments | Description |
+| --- | --- | --- |
+| `/mcp` | `desc` (optional) | List configured MCP servers and their tools |
+| `/tools` | `desc` (optional) | Display all currently available tools |
+| `/approval-mode` | `plan \| default \| auto-edit \| yolo` | Change the approval mode for the session |
+| `/model` | | Switch the model used in the current session |
+| `/extensions` | | List all active extensions |
+| `/memory` | `add <text>` | Manage the model's persistent instruction context |
+| `/agents` | `create \| manage` | Create or manage Subagents |
+
+**Approval mode sub-options:**
+
+| Sub-command | Behavior |
+| --- | --- |
+| `plan` | Read-only analysis — no writes, no shell |
+| `default` | Prompt for every file edit and shell command |
+| `auto-edit` | Auto-approve file edits, prompt for shell |
+| `yolo` | Auto-approve everything |
+
+Pass `--project` or `--user` to persist the mode beyond the current session:
+
+```text
+/approval-mode yolo --project
+```
+
+### Information, settings, and help
+
+| Command | Description | Example |
+| --- | --- | --- |
+| `/help` | Show available commands (alias: `/?`) | `/help` |
+| `/about` | Display version information | `/about` |
+| `/stats` | Show token and tool usage statistics for this session | `/stats` |
+| `/settings` | Open the settings editor | `/settings` |
+| `/auth` | Change the authentication method | `/auth` |
+| `/bug` | Submit a bug report | `/bug Button click unresponsive` |
+| `/copy` | Copy the last response to the clipboard | `/copy` |
+| `/quit` | Exit OpenGame (alias: `/exit`) | `/quit` |
+
+### Keyboard shortcuts
+
+| Shortcut | Function |
+| --- | --- |
+| `Ctrl/Cmd+L` | Clear screen (same as `/clear`) |
+| `Ctrl/Cmd+T` | Toggle tool description visibility |
+| `Ctrl/Cmd+C` × 2 | Exit with confirmation |
+| `Ctrl/Cmd+Z` | Undo text input |
+| `Ctrl/Cmd+Shift+Z` | Redo text input |
+| `Shift+Tab` | Cycle approval mode |
+
+---
+
+## @ commands — file and directory injection
+
+@ commands embed file or directory content into the conversation so the model can analyze code without you copying and pasting.
+
+| Format | Description | Example |
+| --- | --- | --- |
+| `@<file path>` | Inject the contents of a single file | `@src/main.py Please explain this code` |
+| `@<directory path>` | Recursively read all text files in a directory | `@docs/ Summarize this documentation` |
+| Standalone `@` | Reference the literal `@` symbol | `@ What is this symbol used for in programming?` |
+
+<Note>
+Escape spaces in paths with a backslash: `@My\ Documents/file.txt`
+</Note>
+
+---
+
+## ! commands — shell execution
+
+Exclamation commands run system commands directly inside OpenGame without leaving the chat.
+
+| Format | Description | Example |
+| --- | --- | --- |
+| `!<command>` | Execute a single shell command | `!ls -la`, `!git status` |
+| Standalone `!` | Toggle shell passthrough mode — all subsequent input runs as shell commands until you type `!` again | `!` → type commands → `!` |
+
+Commands executed via `!` have the `QWEN_CODE=1` environment variable set.
+
+---
+
+## Custom commands
+
+Custom commands turn frequently used prompts into slash commands stored in TOML files. This is useful for standardizing team workflows, embedding dynamic content, and reducing repetitive prompting.
+
+### Storage locations
+
+| Location | Scope | Priority |
+| --- | --- | --- |
+| `~/.qwen/commands/` | All projects on your machine | Lower |
+| `<project root>/.qwen/commands/` | Current project only | Higher |
+
+Project commands override user commands when names conflict.
+
+### File path to command name mapping
+
+| File path | Generated command |
+| --- | --- |
+| `~/.qwen/commands/test.toml` | `/test` |
+| `.qwen/commands/git/commit.toml` | `/git:commit` |
+| `~/.qwen/commands/refactor/pure.toml` | `/refactor:pure` |
+
+Subdirectory separators (`/` or `\`) become colons (`:`) in the command name.
+
+### TOML file format
+
+```toml
+# ~/.qwen/commands/review.toml
+description = "Code review based on best practices"
+prompt = """
+Review {{args}}, reference standards:
+
+@{docs/code-standards.md}
+"""
+```
+
+| Field | Required | Description |
+| --- | --- | --- |
+| `prompt` | Yes | The prompt text sent to the model |
+| `description` | No | Shown in `/help` output |
+
+### Parameter and content injection
+
+Custom commands support three injection mechanisms that are processed in order:
+
+| Syntax | Processed | Purpose |
+| --- | --- | --- |
+| `@{file path}` | First | Inject static file or directory content |
+| `!{command}` | Second | Inject the output of a shell command |
+| `{{args}}` | Third | Inject arguments passed by the user |
+
+#### `{{args}}` — user argument injection
+
+```toml
+# fix.toml
+prompt = "Fix: {{args}}"
+```
+
+```text
+/fix "Button does not respond to click"
+```
+
+Result: `Fix: "Button does not respond to click"`
+
+#### `!{...}` — shell command injection
+
+Shell commands inside custom prompts show a confirmation dialog before executing:
+
+```toml
+# git/commit.toml
+description = "Generate a commit message based on staged changes"
+prompt = """
+Please generate a commit message based on the following diff:
+
+!{git diff --staged}
+"""
+```
+
+#### `@{...}` — file content injection
+
+```toml
+# review.toml
+description = "Review code against project standards"
+prompt = """
+Review {{args}}, reference standards:
+
+@{docs/code-standards.md}
+"""
+```
+
+Supported file types:
+
+| File type | Support | Handling |
+| --- | --- | --- |
+| Text files | Full | Injected directly |
+| Images / PDFs | Full (multimodal) | Encoded and injected |
+| Binary files | Limited | May be skipped or truncated |
+| Directories | Full | Recursive, follows `.gitignore` |
+
+### Creating a custom command
+
+<Steps>
+  <Step title="Create the directory">
+    ```bash
+    mkdir -p ~/.qwen/commands/refactor
+    ```
+  </Step>
+  <Step title="Write the TOML file">
+    ```toml
+    # ~/.qwen/commands/refactor/pure.toml
+    description = "Refactor code to a pure function"
+    prompt = """
+    Please analyze the code in the current context and refactor it to a pure function.
+    Requirements:
+      1. Provide the refactored code
+      2. Explain key changes and how they implement pure function principles
+      3. Preserve existing behavior
+    """
+    ```
+  </Step>
+  <Step title="Use the command">
+    ```text
+    @src/utils.js
+    /refactor:pure
+    ```
+  </Step>
+</Steps>
+
+### Security
+
+| Mechanism | Protection | User action |
+| --- | --- | --- |
+| Shell escaping | Prevents command injection in `{{args}}` | Automatic |
+| Execution confirmation | Shows dialog before `!{...}` runs | Confirm in dialog |
+| Error reporting | Surfaces execution failures | View error message |
+
+<Tip>
+Use namespaces (subdirectories → colons) to keep commands organized: `/git:commit`, `/review:security`, `/test:coverage`.
+</Tip>
+
+---
+
+## Related pages
+
+<CardGroup cols={2}>
+  <Card title="Approval modes" icon="shield-check" href="/features/approval-mode">
+    Understand the modes controlled by /approval-mode.
+  </Card>
+  <Card title="MCP integration" icon="plug" href="/features/mcp">
+    Add external tools accessible via /mcp and /tools.
+  </Card>
+  <Card title="Agent Skills" icon="wand-magic-sparkles" href="/features/skills">
+    Create model-invoked skills to extend OpenGame's capabilities.
+  </Card>
+  <Card title="Subagents" icon="users" href="/features/sub-agents">
+    Create and manage specialized agents with /agents create.
+  </Card>
+</CardGroup>

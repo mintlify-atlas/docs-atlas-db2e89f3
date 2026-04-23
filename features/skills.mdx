@@ -1,0 +1,273 @@
+---
+title: 'Agent Skills (Experimental): Custom Model Capabilities'
+description: 'Create personal and project-scoped Agent Skills using SKILL.md files to give OpenGame specialized, model-invoked expertise for your workflows.'
+---
+
+Agent Skills are modular capability packages that extend what OpenGame can do. Each Skill is a directory containing a `SKILL.md` file with structured instructions — the model reads these instructions and applies them autonomously when your request matches the Skill's description. Skills are discoverable, composable, and sharable via git, making it easy to encode team expertise once and have it apply automatically across sessions.
+
+<Warning>
+Agent Skills are **experimental** and must be enabled with the `--experimental-skills` flag. The API and file format may change in future releases.
+</Warning>
+
+## Prerequisites
+
+```bash
+opengame --experimental-skills
+```
+
+Skills are discovered at startup from two locations:
+
+- **Personal Skills** — `~/.qwen/skills/` (available across all your projects)
+- **Project Skills** — `.qwen/skills/` in the project root (shared with your team via git)
+
+---
+
+## How Skills are invoked
+
+Skills are **model-invoked** — the model decides autonomously when to load and apply a Skill based on your request and the Skill's description. This is distinct from slash commands, which are **user-invoked** (you explicitly type `/command`).
+
+| | Skills | Slash commands |
+| --- | --- | --- |
+| Trigger | Model decides based on request context | You type the command explicitly |
+| Configuration | `SKILL.md` with YAML frontmatter | TOML file in `.qwen/commands/` |
+| Scope | Personal (`~/.qwen/skills/`) or project (`.qwen/skills/`) | Same scopes |
+| Discovery | Ask the model "What Skills are available?" | `/help` |
+
+The quality of the `description` field directly determines how reliably the model selects a Skill. Write descriptions that include the specific nouns and verbs someone would naturally use when asking for help.
+
+---
+
+## Creating a Skill
+
+<Steps>
+  <Step title="Create the Skill directory">
+    <Tabs>
+      <Tab title="Personal Skill">
+        ```bash
+        mkdir -p ~/.qwen/skills/my-skill-name
+        ```
+        Personal Skills are available in all your projects.
+      </Tab>
+      <Tab title="Project Skill">
+        ```bash
+        mkdir -p .qwen/skills/my-skill-name
+        ```
+        Project Skills are scoped to the repository and can be committed to git for team sharing.
+      </Tab>
+    </Tabs>
+  </Step>
+  <Step title="Write the SKILL.md file">
+    Create a `SKILL.md` file with YAML frontmatter followed by Markdown instructions:
+
+    ```yaml
+    ---
+    name: your-skill-name
+    description: Brief description of what this Skill does and when to use it
+    ---
+
+    # Your Skill Name
+
+    ## Instructions
+    Provide clear, step-by-step guidance for OpenGame.
+
+    ## Examples
+    Show concrete examples of using this Skill.
+    ```
+
+    **Field requirements:**
+
+    | Field | Required | Convention |
+    | --- | --- | --- |
+    | `name` | Yes | Lowercase letters, numbers, and hyphens |
+    | `description` | Yes | Include both **what** it does and **when** to use it |
+  </Step>
+  <Step title="Add supporting files (optional)">
+    Place additional resources alongside `SKILL.md`:
+
+    ```text
+    my-skill/
+    ├── SKILL.md          (required)
+    ├── reference.md      (optional documentation)
+    ├── examples.md       (optional examples)
+    ├── scripts/
+    │   └── helper.py    (optional utility)
+    └── templates/
+        └── template.txt (optional template)
+    ```
+
+    Reference these files from `SKILL.md` using relative paths:
+
+    ````markdown
+    For advanced usage, see [reference.md](reference.md).
+
+    Run the helper script:
+
+    ```bash
+    python scripts/helper.py input.txt
+    ```
+    ````
+  </Step>
+  <Step title="Test the Skill">
+    Start OpenGame with the experimental flag and ask a question that matches your description:
+
+    ```bash
+    opengame --experimental-skills
+    ```
+
+    ```text
+    Can you help me extract text from this PDF?
+    ```
+
+    If your Skill description mentions PDFs, the model should automatically load and apply it.
+  </Step>
+</Steps>
+
+---
+
+## Writing effective descriptions
+
+The `description` field is the primary mechanism the model uses to discover Skills. A vague description leads to Skills being ignored; a specific one triggers reliable invocation.
+
+<Tabs>
+  <Tab title="Too vague">
+    ```yaml
+    description: Helps with documents
+    ```
+
+    The model cannot determine when this Skill is relevant.
+  </Tab>
+  <Tab title="Specific and effective">
+    ```yaml
+    description: Extract text and tables from PDF files, fill forms, merge documents. Use when working with PDFs, forms, or document extraction.
+    ```
+
+    Specific nouns (`PDF`, `forms`, `tables`) and action verbs (`extract`, `fill`, `merge`) give the model clear signals.
+  </Tab>
+</Tabs>
+
+Additional description tips:
+
+- Include the file extensions or formats the Skill handles (`.xlsx`, `.pdf`, `.csv`)
+- Mention the actions it performs (`analyze`, `generate`, `convert`, `review`)
+- Add a "Use when..." clause with natural language triggers
+
+---
+
+## Viewing available Skills
+
+```bash
+# Ask the model directly
+opengame --experimental-skills
+# Then type:
+# "What Skills are available?"
+
+# Inspect the filesystem
+ls ~/.qwen/skills/           # Personal Skills
+ls .qwen/skills/             # Project Skills
+cat ~/.qwen/skills/my-skill/SKILL.md  # Read a specific Skill
+```
+
+---
+
+## Sharing Skills with your team
+
+Project Skills under `.qwen/skills/` can be committed to version control:
+
+```bash
+git add .qwen/skills/
+git commit -m "Add team Skill for PDF processing"
+git push
+```
+
+Teammates pull the changes and run with `--experimental-skills` to access the shared Skills automatically.
+
+---
+
+## Updating and removing Skills
+
+```bash
+# Edit a personal Skill
+code ~/.qwen/skills/my-skill/SKILL.md
+
+# Edit a project Skill
+code .qwen/skills/my-skill/SKILL.md
+
+# Remove a personal Skill
+rm -rf ~/.qwen/skills/my-skill
+
+# Remove a project Skill and commit
+rm -rf .qwen/skills/my-skill
+git commit -m "Remove unused Skill"
+```
+
+Changes take effect the next time OpenGame starts. If OpenGame is already running, restart it to load updates.
+
+---
+
+## Troubleshooting
+
+<AccordionGroup>
+  <Accordion title="The model doesn't use my Skill">
+    **Check the description**: it is the primary trigger. Add specific keywords, file types, and "Use when..." phrases.
+
+    **Verify the file path**:
+
+    ```bash
+    # Personal
+    ls ~/.qwen/skills/my-skill/SKILL.md
+
+    # Project
+    ls .qwen/skills/my-skill/SKILL.md
+    ```
+
+    **Ensure `--experimental-skills` is passed** when starting OpenGame.
+  </Accordion>
+  <Accordion title="Skill fails to load — YAML errors">
+    Invalid YAML in the frontmatter prevents the Skill from loading. Check the syntax:
+
+    ```bash
+    head -n 15 ~/.qwen/skills/my-skill/SKILL.md
+    ```
+
+    Ensure:
+    - Opening `---` is on line 1
+    - Closing `---` appears before any Markdown content
+    - No tabs in YAML (use spaces)
+    - Valid YAML syntax throughout
+  </Accordion>
+  <Accordion title="Debug Skill loading">
+    Run with debug mode to see Skill loading errors:
+
+    ```bash
+    opengame --experimental-skills --debug
+    ```
+  </Accordion>
+</AccordionGroup>
+
+---
+
+## Best practices
+
+- **Keep Skills focused**: one Skill per capability. "PDF form filling" is better than "Document processing".
+- **Write clear descriptions**: include specific triggers the model will recognize from natural language requests.
+- **Test with your team**: verify the Skill activates when expected, the instructions are unambiguous, and edge cases are covered with examples.
+- **Version control project Skills**: committing `.qwen/skills/` makes expertise reusable and auditable across your team.
+
+---
+
+## Related pages
+
+<CardGroup cols={2}>
+  <Card title="CLI commands" icon="terminal" href="/features/commands">
+    Learn about slash and custom commands, which are user-invoked counterparts to model-invoked Skills.
+  </Card>
+  <Card title="Subagents" icon="users" href="/features/sub-agents">
+    Create specialized AI agents for focused tasks like testing or documentation.
+  </Card>
+  <Card title="MCP integration" icon="plug" href="/features/mcp">
+    Add external tool servers to expand the model's action space.
+  </Card>
+  <Card title="Headless mode" icon="rectangle-terminal" href="/features/headless">
+    Enable Skills in non-interactive runs with --experimental-skills.
+  </Card>
+</CardGroup>

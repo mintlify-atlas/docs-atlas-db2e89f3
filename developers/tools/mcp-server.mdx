@@ -1,0 +1,533 @@
+---
+title: 'MCP Server Tools Integration — OpenGame Developer Guide'
+description: "How OpenGame discovers and executes MCP server tools: transport types, name prefixing to avoid conflicts, trust settings, and SDK-embedded server configuration."
+---
+
+Model Context Protocol (MCP) servers let you extend OpenGame with custom tools that reach beyond the built-in file system, shell, and web capabilities. An MCP server exposes a set of tools through a standardised protocol; the core package discovers those tools at startup, registers them in the global tool registry, and makes them available to the language model exactly like built-in tools. This page explains how that integration works under the hood and how to configure it.
+
+## What an MCP server provides
+
+An MCP server is an independent process (or HTTP endpoint) that implements the Model Context Protocol. Through that protocol it can:
+
+- **List tools** — expose function declarations with names, descriptions, and JSON-schema-typed parameters.
+- **Execute tools** — accept a tool call with arguments and return structured results, including rich content such as text, images, audio, and embedded resources.
+- **List prompts** — expose named prompt templates that become slash commands in the CLI (e.g. `/poem-writer`).
+
+With MCP you can integrate databases, external APIs, custom game-asset pipelines, or any other system the built-in tools cannot reach.
+
+---
+
+## Core integration architecture
+
+The integration is implemented in two files inside `packages/core/src/tools/`:
+
+### Discovery layer (`mcp-client.ts`)
+
+The top-level entry point is `discoverMcpTools()`. On startup it:
+
+1. Reads the `mcpServers` configuration from `settings.json`.
+2. Launches a `connectAndDiscover()` call for every configured server in parallel.
+3. For each server, selects the correct transport, establishes a connection, and calls the MCP `tools/list` endpoint.
+4. Sanitises and validates every returned `FunctionDeclaration`.
+5. Wraps each valid declaration in a `DiscoveredMCPTool` and registers it with the `ToolRegistry`.
+
+```typescript
+// packages/core/src/tools/mcp-client.ts (simplified)
+export async function discoverMcpTools(
+  mcpServers: Record<string, MCPServerConfig>,
+  mcpServerCommand: string | undefined,
+  toolRegistry: ToolRegistry,
+  promptRegistry: PromptRegistry,
+  debugMode: boolean,
+  workspaceContext: WorkspaceContext,
+  cliConfig: Config,
+): Promise<void> {
+  mcpDiscoveryState = MCPDiscoveryState.IN_PROGRESS;
+  try {
+    const discoveryPromises = Object.entries(mcpServers).map(
+      ([name, config]) => connectAndDiscover(name, config, toolRegistry, ...),
+    );
+    await Promise.all(discoveryPromises);
+  } finally {
+    mcpDiscoveryState = MCPDiscoveryState.COMPLETED;
+  }
+}
+```
+
+### Execution layer (`mcp-tool.ts`)
+
+Each discovered tool is wrapped in a `DiscoveredMCPTool` instance that handles:
+
+- **Confirmation logic** — prompts for user approval unless the server is trusted.
+- **Tool execution** — forwards the call to the underlying `CallableTool` with the original server tool name.
+- **Response processing** — formats results for both the model context (`llmContent`) and the CLI display (`returnDisplay`).
+
+---
+
+## Transport mechanisms
+
+OpenGame supports three transport types:
+
+| Config property | Transport class | Use case |
+|---|---|---|
+| `command` | `StdioClientTransport` | Local processes communicating via stdin/stdout |
+| `url` | `SSEClientTransport` | Servers using Server-Sent Events |
+| `httpUrl` | `StreamableHTTPClientTransport` | Servers using HTTP streaming |
+
+The transport is selected automatically based on which property is present in the server configuration.
+
+---
+
+## Tool discovery in detail
+
+### Name sanitisation
+
+Tool names returned by an MCP server are sanitised to meet API requirements:
+
+- Characters that are not alphanumeric, underscore, dot, or hyphen are replaced with underscores.
+- Names longer than 63 characters are truncated with a middle replacement (`___`).
+
+### Tool filtering
+
+Before registering, each tool is checked against `includeTools` and `excludeTools` from the server configuration:
+
+```typescript
+// packages/core/src/tools/mcp-client.ts
+export function isEnabled(
+  funcDecl: FunctionDeclaration,
+  mcpServerName: string,
+  mcpServerConfig: MCPServerConfig,
+): boolean {
+  const { includeTools, excludeTools } = mcpServerConfig;
+
+  // excludeTools takes precedence over includeTools
+  if (excludeTools && excludeTools.includes(funcDecl.name)) {
+    return false;
+  }
+
+  return (
+    !includeTools ||
+    includeTools.some(
+      (tool) => tool === funcDecl.name || tool.startsWith(`${funcDecl.name}(`),
+    )
+  );
+}
+```
+
+### Name conflict resolution
+
+When two servers expose a tool with the same name, the first to register keeps the plain name and subsequent servers receive a prefixed name:
+
+```
+# Server "filesystemServer" registers first → gets the plain name
+read_file
+
+# Server "myServer" also has "read_file" → gets a prefixed name
+myServer__read_file
+```
+
+This prefixing is transparent to you; the model receives both names in its tool list.
+
+### Schema processing
+
+Parameter schemas undergo several sanitisation passes for API compatibility:
+
+- `$schema` properties are removed.
+- `additionalProperties` fields are stripped.
+- `anyOf` default values are removed (required for Vertex AI compatibility).
+- Processing recurses into nested schemas.
+
+---
+
+## Server configuration reference
+
+Add an `mcpServers` object to your `settings.json` to configure servers:
+
+```json
+{
+  "mcpServers": {
+    "myServer": {
+      "command": "node",
+      "args": ["dist/server.js"],
+      "cwd": "./mcp-servers/my-server",
+      "env": {
+        "API_KEY": "$MY_API_KEY"
+      },
+      "timeout": 30000,
+      "trust": false,
+      "includeTools": ["safe_tool", "read_data"],
+      "excludeTools": ["delete_data"]
+    }
+  }
+}
+```
+
+### Configuration properties
+
+<AccordionGroup>
+  <Accordion title="Transport (one required)">
+    <ParamField path="command" type="string">
+      Executable path for Stdio transport (e.g. `"node"`, `"python"`).
+    </ParamField>
+    <ParamField path="url" type="string">
+      SSE endpoint URL (e.g. `"http://localhost:8080/sse"`).
+    </ParamField>
+    <ParamField path="httpUrl" type="string">
+      HTTP streaming endpoint URL (e.g. `"http://localhost:3000/mcp"`).
+    </ParamField>
+  </Accordion>
+  <Accordion title="Stdio-specific options">
+    <ParamField path="args" type="string[]">
+      Command-line arguments (e.g. `["dist/server.js", "--verbose"]`).
+    </ParamField>
+    <ParamField path="cwd" type="string">
+      Working directory for the server process.
+    </ParamField>
+    <ParamField path="env" type="object">
+      Environment variables. Values can reference shell variables with `$VAR` or `${VAR}` syntax.
+    </ParamField>
+  </Accordion>
+  <Accordion title="Connection options">
+    <ParamField path="timeout" type="number">
+      Request timeout in milliseconds. Default: 600 000 ms (10 minutes).
+    </ParamField>
+    <ParamField path="headers" type="object">
+      Custom HTTP headers for SSE or HTTP transports.
+    </ParamField>
+  </Accordion>
+  <Accordion title="Trust and tool filtering">
+    <ParamField path="trust" type="boolean">
+      When `true`, bypasses all confirmation dialogs for tools from this server. Use only for servers you fully control. Default: `false`.
+    </ParamField>
+    <ParamField path="includeTools" type="string[]">
+      Allowlist of tool names. When set, only listed tools are registered from this server.
+    </ParamField>
+    <ParamField path="excludeTools" type="string[]">
+      Blocklist of tool names. Listed tools are never registered even if they appear in `includeTools`. `excludeTools` takes precedence.
+    </ParamField>
+  </Accordion>
+</AccordionGroup>
+
+### Example configurations
+
+<Tabs>
+  <Tab title="Node.js (Stdio)">
+    ```json
+    {
+      "mcpServers": {
+        "nodeServer": {
+          "command": "node",
+          "args": ["dist/server.js", "--verbose"],
+          "cwd": "./mcp-servers/node",
+          "trust": true
+        }
+      }
+    }
+    ```
+  </Tab>
+  <Tab title="Python (Stdio)">
+    ```json
+    {
+      "mcpServers": {
+        "pythonTools": {
+          "command": "python",
+          "args": ["-m", "my_mcp_server", "--port", "8080"],
+          "cwd": "./mcp-servers/python",
+          "env": {
+            "DATABASE_URL": "$DB_CONNECTION_STRING",
+            "API_KEY": "${EXTERNAL_API_KEY}"
+          },
+          "timeout": 15000
+        }
+      }
+    }
+    ```
+  </Tab>
+  <Tab title="Docker (Stdio)">
+    ```json
+    {
+      "mcpServers": {
+        "dockerizedServer": {
+          "command": "docker",
+          "args": [
+            "run", "-i", "--rm",
+            "-e", "API_KEY",
+            "-v", "${PWD}:/workspace",
+            "my-mcp-server:latest"
+          ],
+          "env": {
+            "API_KEY": "$EXTERNAL_SERVICE_TOKEN"
+          }
+        }
+      }
+    }
+    ```
+  </Tab>
+  <Tab title="HTTP">
+    ```json
+    {
+      "mcpServers": {
+        "httpServerWithAuth": {
+          "httpUrl": "http://localhost:3000/mcp",
+          "headers": {
+            "Authorization": "Bearer your-api-token"
+          },
+          "timeout": 5000
+        }
+      }
+    }
+    ```
+  </Tab>
+  <Tab title="Tool filtering">
+    ```json
+    {
+      "mcpServers": {
+        "filteredServer": {
+          "command": "python",
+          "args": ["-m", "my_mcp_server"],
+          "includeTools": ["safe_tool", "file_reader", "data_processor"],
+          "excludeTools": ["dangerous_tool", "file_deleter"],
+          "timeout": 30000
+        }
+      }
+    }
+    ```
+  </Tab>
+</Tabs>
+
+---
+
+## Trust settings and confirmation bypass
+
+By default every MCP tool call requires user confirmation. The confirmation dialog shows the server name, tool name, and the arguments the model intends to pass.
+
+When confirmation is shown you can choose:
+
+| Choice | Effect |
+|---|---|
+| **Proceed once** | Execute this call only |
+| **Always allow this tool** | Add `serverName.toolName` to the session allowlist |
+| **Always allow this server** | Add `serverName` to the session allowlist |
+| **Cancel** | Abort the tool call |
+
+Setting `"trust": true` in `settings.json` bypasses all of this for the named server:
+
+```typescript
+// packages/core/src/tools/mcp-tool.ts (simplified)
+if (this.cliConfig?.isTrustedFolder() && this.trust) {
+  return false; // No confirmation needed
+}
+```
+
+<Warning>
+The `trust` option is irreversible for the duration of the session. Only set it for servers you authored and fully control. A trusted server can execute any tool it exposes without prompting you.
+</Warning>
+
+---
+
+## Global MCP settings
+
+The `mcp` object in `settings.json` defines rules that apply across all servers:
+
+```json
+{
+  "mcp": {
+    "allowed": ["my-trusted-server", "asset-pipeline"],
+    "excluded": ["experimental-server"]
+  }
+}
+```
+
+- **`mcp.allowed`** — only servers listed here will be connected to (allowlist).
+- **`mcp.excluded`** — servers listed here will never be connected to even if they appear in `mcpServers`.
+
+---
+
+## SDK-embedded MCP servers
+
+OpenGame also supports MCP servers that are embedded directly in the SDK and communicate via an internal control plane rather than a subprocess or network socket. These servers use the `SdkControlClientTransport` instead of a standard transport:
+
+```typescript
+// packages/core/src/tools/mcp-client.ts
+if (isSdkMcpServerConfig(mcpServerConfig)) {
+  return new SdkControlClientTransport({
+    serverName: mcpServerName,
+    sendMcpMessage: sendSdkMcpMessage,
+    debugMode,
+  });
+}
+```
+
+SDK-embedded servers behave identically to external ones from the model's perspective — they appear in the tool list, go through the same discovery, naming, and confirmation flow — but they do not require a separate process or network connection.
+
+---
+
+## OAuth authentication for remote servers
+
+Remote MCP servers using SSE or HTTP transports can require OAuth 2.0 authentication. OpenGame handles the OAuth flow automatically when a server returns `401 Unauthorized`:
+
+<Steps>
+  <Step title="Initial connection attempt">
+    OpenGame tries to connect. The server returns `401` with a `WWW-Authenticate` header.
+  </Step>
+  <Step title="OAuth discovery">
+    OpenGame reads the `WWW-Authenticate` header to locate the OAuth authorization and token endpoints.
+  </Step>
+  <Step title="Browser authentication">
+    Your browser opens the authorization URL. You authenticate with the identity provider.
+  </Step>
+  <Step title="Token exchange">
+    The authorization code is exchanged for access and refresh tokens, stored in `~/.qwen/mcp-oauth-tokens.json`.
+  </Step>
+  <Step title="Retry with token">
+    OpenGame retries the connection using the access token in the `Authorization: Bearer` header.
+  </Step>
+</Steps>
+
+Use the `/mcp auth` command to manage OAuth credentials:
+
+```bash
+# List servers requiring authentication
+/mcp auth
+
+# Authenticate with a specific server
+/mcp auth serverName
+
+# Re-authenticate if tokens expire
+/mcp auth serverName
+```
+
+---
+
+## MCP prompts as slash commands
+
+In addition to tools, MCP servers can expose named prompts. These become slash commands in the CLI. A minimal server that registers a prompt:
+
+```typescript
+import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
+import { z } from 'zod';
+
+const server = new McpServer({ name: 'prompt-server', version: '1.0.0' });
+
+server.registerPrompt(
+  'poem-writer',
+  {
+    title: 'Poem Writer',
+    description: 'Write a haiku',
+    argsSchema: { title: z.string(), mood: z.string().optional() },
+  },
+  ({ title, mood }) => ({
+    messages: [{
+      role: 'user',
+      content: {
+        type: 'text',
+        text: `Write a haiku${mood ? ` with mood ${mood}` : ''} called ${title}.`,
+      },
+    }],
+  }),
+);
+
+const transport = new StdioServerTransport();
+await server.connect(transport);
+```
+
+Once connected, invoke the prompt with:
+
+```bash
+/poem-writer --title="OpenGame" --mood="reverent"
+# or with positional arguments
+/poem-writer "OpenGame" reverent
+```
+
+---
+
+## Managing servers with CLI commands
+
+<AccordionGroup>
+  <Accordion title="Add a server">
+    ```bash
+    # Stdio server
+    opengame mcp add my-server -e API_KEY=123 /path/to/server arg1 arg2
+
+    # HTTP server with auth header
+    opengame mcp add --transport http secure-http \
+      https://api.example.com/mcp/ \
+      --header "Authorization: Bearer abc123"
+
+    # Trusted server
+    opengame mcp add my-trusted-server node dist/server.js --trust
+    ```
+  </Accordion>
+  <Accordion title="List all servers">
+    ```bash
+    opengame mcp list
+    ```
+
+    Example output:
+
+    ```
+    ✓ stdio-server: command: python3 server.py (stdio) - Connected
+    ✓ http-server: https://api.example.com/mcp (http) - Connected
+    ✗ sse-server: https://api.example.com/sse (sse) - Disconnected
+    ```
+  </Accordion>
+  <Accordion title="Remove a server">
+    ```bash
+    opengame mcp remove my-server
+    ```
+  </Accordion>
+  <Accordion title="Check server status in the CLI">
+    ```bash
+    /mcp
+    ```
+
+    Displays all configured servers, their connection status, and the list of tools each server exposes.
+  </Accordion>
+</AccordionGroup>
+
+---
+
+## Returning rich content from MCP tools
+
+MCP tools are not limited to returning text. A tool's `content` array can contain mixed content blocks:
+
+```json
+{
+  "content": [
+    { "type": "text", "text": "Here is the generated sprite sheet." },
+    { "type": "image", "data": "<base64>", "mimeType": "image/png" },
+    { "type": "text", "text": "Sprite dimensions: 512×512 at 32×32 per frame." }
+  ]
+}
+```
+
+Supported block types: `text`, `image`, `audio`, `resource` (embedded content), `resource_link`.
+
+OpenGame separates text blocks into a `functionResponse` part and binary blocks into `inlineData` parts before passing the result to the model, enabling it to reason about multi-modal tool output in a single turn.
+
+---
+
+## Troubleshooting
+
+<AccordionGroup>
+  <Accordion title="Server shows DISCONNECTED">
+    1. Verify `command`, `args`, and `cwd` are correct.
+    2. Run the server command directly in a terminal to confirm it starts.
+    3. Check that all dependencies are installed.
+    4. Run with `--debug` for verbose MCP stderr output.
+  </Accordion>
+  <Accordion title="No tools discovered after connecting">
+    1. Confirm the server calls `tools/list` correctly per the MCP spec.
+    2. Check that `includeTools` / `excludeTools` are not filtering out all tools.
+    3. Look at stderr for server-side errors (shown in debug mode).
+  </Accordion>
+  <Accordion title="Tools discovered but fail to execute">
+    1. Validate that the tool's input schema matches what the model sends.
+    2. Increase `timeout` if the server is slow to respond.
+    3. Check `excludeTools` has not accidentally blocked the intended tool.
+  </Accordion>
+  <Accordion title="MCP server not available inside sandbox">
+    When sandboxing is enabled, MCP server executables (e.g. `npx`, `node`, `python`) must be available inside the sandbox environment. For Docker-based sandboxes, add the executables to your sandbox image.
+  </Accordion>
+</AccordionGroup>

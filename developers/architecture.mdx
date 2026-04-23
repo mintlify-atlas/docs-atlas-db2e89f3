@@ -1,0 +1,200 @@
+---
+title: "OpenGame Architecture: Two-Package System Explained"
+description: "A deep-dive into OpenGame's CLI and Core package design, the tool layer, interaction flow, configuration precedence, and game-specific extensions."
+---
+
+OpenGame is structured around a clean separation between what the user sees and what the agent does. The CLI package owns the terminal experience, while the Core package orchestrates every interaction with the model and the tool layer. This split makes it straightforward to extend either side independently—swap in a different frontend, wire up a new model endpoint, or register a custom tool—without disturbing the other.
+
+## Two-package architecture
+
+OpenGame ships as an npm workspace with two primary packages. Each has a distinct responsibility boundary that is enforced at the ESLint level: cross-package imports are restricted to prevent accidental coupling.
+
+<CardGroup cols={2}>
+  <Card title="packages/cli" icon="terminal" href="/developers/architecture">
+    User-facing layer. Handles input parsing, display rendering, theme/UI, history management, and all configuration surfaces visible to the user.
+  </Card>
+  <Card title="packages/core" icon="cpu" href="/developers/architecture">
+    Backend layer. Runs the API client, constructs prompts, registers and executes tools, and maintains conversation and session state.
+  </Card>
+</CardGroup>
+
+### CLI package (`packages/cli`)
+
+The CLI package is everything the user directly touches in the terminal. Its source tree (`packages/cli/src/`) is organized around the concerns of a rich interactive application built on [Ink](https://github.com/vadimdemedes/ink), React's renderer for terminal output.
+
+**Key responsibilities:**
+
+- **Input processing** — Accepts free-text prompts as well as structured shorthand: slash commands (`/help`, `/clear`, `/model`), at-file references (`@file` to inline file content), and bang commands (`!command` for direct shell passthrough).
+- **History management** — Persists conversation history across sessions and enables session resumption so long-running coding tasks can be picked up where they left off.
+- **Display rendering** — Formats and streams model responses to the terminal with syntax highlighting, proper line wrapping, and diff-style edit previews.
+- **Theme and UI customization** — Supports multiple built-in themes and user-defined overrides so teams can match their preferred terminal aesthetics.
+- **Configuration settings** — Reads and merges settings from JSON files, environment variables, and command-line flags according to the global precedence order described below.
+
+Source subdirectories of note: `ui/` (React/Ink components), `commands/` (slash-command handlers), `config/` (settings loading), `services/` (background services), `nonInteractive/` (headless/non-interactive entry points).
+
+### Core package (`packages/core`)
+
+The Core package is the agent's brain. It receives structured requests from the CLI, talks to the model API, and decides what to do next—including whether to invoke a tool, wait for user approval, or stream a final answer back up to the CLI.
+
+**Key responsibilities:**
+
+- **API client** — Communicates with any OpenAI-compatible model endpoint. The client is configured to speak to the Qwen model API by default but accepts any base URL and key pair, including GameCoder-27B running locally.
+- **Prompt construction** — Builds the messages array sent to the model on each turn: system instructions, conversation history, available tool definitions (in JSON Schema format), and any in-context memory loaded from `.qwen/GEMINI.md` or user memory files.
+- **Tool registration and execution** — Maintains a registry of all available tools (`packages/core/src/tools/tool-registry.ts`). When the model returns a tool-call request, the Core validates arguments, gates write/execute operations behind the user's approval mode, runs the tool, and feeds results back to the model.
+- **State management** — Tracks the full conversation turn list, session identifiers, and the running token budget. Handles mid-session compression when context approaches the model's limit.
+- **Server-side configuration** — Evaluates model selection, session turn limits, and context-window parameters.
+
+Source subdirectories of note: `tools/` (individual tool modules), `prompts/` (prompt templates and assembly), `config/` (model config, constants, storage), `mcp/` (MCP client and server management), `skills/` (skill loading and execution), `subagents/` (sub-agent orchestration), `qwen/` (model API client).
+
+### Tools layer (`packages/core/src/tools/`)
+
+Tools extend the model's capabilities beyond text generation. The Core registers them, describes them to the model in JSON Schema, and executes them on demand. The tool directory contains dedicated modules for every supported capability:
+
+<AccordionGroup>
+  <Accordion title="File operations">
+    - `read-file.ts` / `read-many-files.ts` — Read single or multiple files into context. These are read-only and do not require explicit user approval.
+    - `write-file.ts` — Write or overwrite a file. Requires approval unless the session is in `auto-edit` or `yolo` mode.
+    - `edit.ts` / `smart-edit.ts` — Apply targeted diffs to existing files. `smart-edit.ts` handles larger structural changes.
+    - `ls.ts` — List directory contents.
+    - `glob.ts` — Fast file pattern matching across the project tree.
+    - `copy-template.ts` — Copy a game template skeleton into the working directory (used by Game Skill).
+  </Accordion>
+  <Accordion title="Shell commands">
+    - `shell.ts` — Execute arbitrary shell commands. Always gated by the approval mode. In `default` mode every shell invocation surfaces a confirmation prompt; `--yolo` auto-approves all.
+    - `exitPlanMode.ts` — Transitions the agent out of planning-only mode into execution mode.
+  </Accordion>
+  <Accordion title="Search tools">
+    - `grep.ts` / `ripGrep.ts` — Search file content with regex patterns; `ripGrep.ts` wraps the native `rg` binary for speed on large codebases.
+    - `task.ts` — Spawn a sub-agent to handle a scoped research or coding task.
+    - `todoWrite.ts` — Write and update the agent's task checklist, visible to both the model and the user.
+  </Accordion>
+  <Accordion title="Web tools">
+    - `web-fetch.ts` — Fetch and convert web page content to markdown for in-context reading.
+    - `web-search/` — Web search via the Tavily API, returning ranked results with snippets.
+  </Accordion>
+  <Accordion title="Game-specific tools">
+    - `generate-gdd.ts` — Generate a Game Design Document from the user's prompt.
+    - `generate-assets.ts` / `generate-assets-types.ts` — Call image/audio/video providers to create game assets.
+    - `generate-tilemap.ts` — Generate structured tilemap data for 2-D games.
+    - `game-type-classifier.ts` — Classify the target game genre to select the right template.
+    - `skill.ts` — Load and execute a named skill (Template Skill or Debug Skill).
+  </Accordion>
+  <Accordion title="MCP integration">
+    - `mcp-client.ts` / `mcp-client-manager.ts` / `mcp-tool.ts` — Connect to Model Context Protocol servers, enumerate their exposed tools, and proxy calls through them as if they were native tools.
+  </Accordion>
+  <Accordion title="Memory and context">
+    - `memoryTool.ts` — Read from and write to persistent memory files so the agent can recall project-level facts across sessions.
+  </Accordion>
+</AccordionGroup>
+
+## Interaction flow
+
+A complete turn, from keystroke to rendered response, passes through the following stages:
+
+<Steps>
+  <Step title="User input">
+    The user types a prompt or command into the terminal. The CLI parses it for special prefixes (`/`, `@`, `!`) and, for a plain prompt, packages the text into a structured request object.
+  </Step>
+  <Step title="Request to Core">
+    The CLI sends the request to the Core package. The Core retrieves the current conversation history and any loaded memory context to prepare for prompt construction.
+  </Step>
+  <Step title="Prompt construction and model call">
+    The Core assembles the messages array—system prompt, conversation history, tool definitions in JSON Schema, and memory context—then sends the request to the configured model API endpoint.
+  </Step>
+  <Step title="Model API response">
+    The model returns either a text response or a structured tool-call request naming one of the registered tools and providing its arguments.
+  </Step>
+  <Step title="Tool execution">
+    If the model requests a tool, the Core checks whether the operation requires user approval based on the active approval mode. Write and execute operations surface a confirmation prompt in the terminal unless the mode is `auto-edit` or `yolo`. Once approved (or auto-approved), the Core runs the tool and sends the result back to the model API for the next turn.
+  </Step>
+  <Step title="Response to CLI">
+    When the model produces a final text response (not another tool call), the Core streams it back to the CLI package.
+  </Step>
+  <Step title="Display to user">
+    The CLI renders the response in the terminal with syntax highlighting, code blocks, and any relevant diff previews, then returns control to the input prompt.
+  </Step>
+</Steps>
+
+## Configuration layers
+
+OpenGame resolves configuration from seven sources, evaluated in order from highest to lowest precedence:
+
+<Note>
+  Settings from a higher-precedence source always override the same key from a lower-precedence source. There is no merging within a key—the first match wins.
+</Note>
+
+| Precedence | Source | Example |
+|---|---|---|
+| 1 (highest) | Command-line arguments | `--model gpt-4o` |
+| 2 | Environment variables | `OPENAI_API_KEY=sk-...` |
+| 3 | Project settings file | `.qwen/settings.json` |
+| 4 | User settings file | `~/.qwen/settings.json` |
+| 5 | System settings files | System-wide deployment defaults |
+| 6 | Default values | Compiled-in fallbacks |
+
+**Configuration categories:**
+
+- **General** — vim mode, preferred editor, auto-update behavior
+- **UI** — theme selection, banner and footer visibility
+- **Model** — model identifier, session turn limits, compression thresholds
+- **Context** — context file names, directory inclusion rules, file filters
+- **Tool** — approval mode (`default`, `auto-edit`, `yolo`), sandboxing, tool allow/deny lists
+- **Privacy** — usage statistics collection opt-in
+- **Advanced** — debug flags, custom bug-report commands
+
+<Info>
+  The on-disk settings directory is currently named `.qwen` for backward compatibility with the upstream qwen-code runtime. A migration to `.opengame` is planned for a future release.
+</Info>
+
+## Key design principles
+
+<AccordionGroup>
+  <Accordion title="Modularity">
+    Separating the CLI (frontend) from the Core (backend) allows each to evolve independently. A future web frontend or VS Code extension can talk to the same Core without any changes to the agent logic. ESLint import restrictions enforce the boundary at development time.
+  </Accordion>
+  <Accordion title="Extensibility">
+    The tool registry is open-ended. New capabilities can be added by dropping a new module in `packages/core/src/tools/`, registering it in `tool-registry.ts`, and describing it to the model in JSON Schema. MCP server integration extends this further by treating external servers as a dynamic source of additional tools.
+  </Accordion>
+  <Accordion title="User experience">
+    The CLI is built on Ink (React for terminals) to deliver a rich, reactive interface with syntax highlighting, customizable themes, real-time streaming, and intuitive command structures—features more commonly found in GUI tools.
+  </Accordion>
+  <Accordion title="Security">
+    Every write and execute operation is gated by the approval mode. In the default mode the user must explicitly confirm each modification before it runs. Sandboxing via macOS Seatbelt, Docker, or Podman can further isolate shell command execution from the host system.
+  </Accordion>
+  <Accordion title="Flexibility">
+    OpenGame accepts any OpenAI-compatible model endpoint. Asset generation (image, video, audio, reasoning) is configured independently per modality, so teams can mix providers without coupling any single service to the whole pipeline.
+  </Accordion>
+</AccordionGroup>
+
+## Game-specific extensions
+
+OpenGame adds three layers on top of the base agent runtime that are specific to interactive game generation:
+
+### Game Skill
+
+Game Skill is the reusable, evolving capability that guides the agent from a user prompt to a playable game. It is composed of two sub-skills:
+
+<CardGroup cols={2}>
+  <Card title="Template Skill" icon="layout-template" href="/developers/architecture">
+    Selects the right engine and project skeleton for the target game type (canvas, Phaser, three.js, etc.) based on the output of `game-type-classifier.ts`. The library of templates grows over time as successful runs are added back as new skeleton options.
+  </Card>
+  <Card title="Debug Skill" icon="bug" href="/developers/architecture">
+    Runs the generated game in a sandboxed headless browser, captures console errors, broken interactions, and rendering failures, then systematically resolves each issue using a living protocol of verified fixes—rather than patching isolated syntax errors in isolation.
+  </Card>
+</CardGroup>
+
+Together, Template Skill and Debug Skill move the agent from "generates plausible game code" to "ships a game that actually runs in a browser."
+
+### GameCoder-27B integration
+
+GameCoder-27B is a code LLM purpose-built for OpenGame. It is trained in three stages:
+
+1. **Continual pre-training** on a corpus of game engine APIs, JavaScript game development patterns, and web platform APIs.
+2. **Supervised fine-tuning (SFT)** on curated game-development trajectories that cover engine APIs, project scaffolding, multi-file consistency, and bug-fix workflows.
+3. **Reinforcement learning** with reward signals derived from real game playability using OpenGame-Bench-style verifiers—not static code metrics.
+
+GameCoder-27B is configured exactly like any other model: set `OPENAI_BASE_URL` to your local inference endpoint and `OPENAI_MODEL` to the model identifier. No code changes are required.
+
+### OpenGame-Bench
+
+OpenGame-Bench is an evaluation pipeline that scores agentic game generation along three axes: **Build Health** (does the project compile and serve?), **Visual Usability** (does the game render correctly in a headless browser?), and **Intent Alignment** (does the game match the original prompt, scored by a VLM judge?). It drives scripted interactions against the generated game rather than inspecting static code, making it a genuine test of end-to-end playability.

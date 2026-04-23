@@ -1,0 +1,334 @@
+---
+title: 'Subagents: Delegate Tasks to Specialized AI Assistants'
+description: 'Create Subagents with custom system prompts and tool access, then let OpenGame auto-delegate tasks to the right specialist or invoke agents by name.'
+---
+
+Subagents are independent AI assistants you configure inside OpenGame to handle specific types of work. Instead of asking the main AI to do everything, you build a roster of specialists — a testing expert, a documentation writer, a security reviewer — and delegate tasks to them. Each Subagent operates in its own conversation context, has access only to the tools you configure, and works autonomously until it returns a result.
+
+## What Subagents are
+
+Each Subagent is defined by a Markdown file with YAML frontmatter that specifies:
+
+- A **name** — the identifier used to reference the agent
+- A **description** — what it does and when to use it (also used by the main AI to auto-delegate)
+- A **tool list** — the specific tools the agent can access
+- A **system prompt** — the agent's expertise, approach, and output standards
+
+Subagents maintain **separate conversation history** from your main chat, preventing specialized work from polluting your primary context.
+
+## Key benefits
+
+<CardGroup cols={2}>
+  <Card title="Task specialization" icon="crosshairs">
+    Each agent is optimized for a specific workflow — testing, documentation, code review, or technology-specific tasks.
+  </Card>
+  <Card title="Context isolation" icon="box">
+    Specialized work stays separate from your main conversation, keeping both contexts clean and focused.
+  </Card>
+  <Card title="Reusability" icon="rotate">
+    Agent configurations are saved as files you can commit to git and share across projects and teammates.
+  </Card>
+  <Card title="Controlled tool access" icon="shield-check">
+    Limit which tools each agent can use for security and to keep the agent focused on its specialty.
+  </Card>
+</CardGroup>
+
+## How delegation works
+
+<Steps>
+  <Step title="Configuration">
+    You create Subagent files that define behavior, tools, and the system prompt.
+  </Step>
+  <Step title="Delegation">
+    The main AI automatically delegates tasks to appropriate Subagents based on request content and agent descriptions. You can also invoke agents explicitly by name.
+  </Step>
+  <Step title="Execution">
+    The Subagent works independently using its configured tools. You see real-time progress as it runs.
+  </Step>
+  <Step title="Results">
+    The Subagent returns its results and an execution summary back to the main conversation.
+  </Step>
+</Steps>
+
+```text
+User: "Please write comprehensive tests for the authentication module"
+AI: I'll delegate this to your testing specialist Subagents.
+[Delegates to "testing-expert"]
+[Shows real-time progress of test creation]
+[Returns with completed test files and execution summary]
+```
+
+---
+
+## Getting started
+
+### Create your first Subagent
+
+```text
+/agents create
+```
+
+Follow the guided wizard to define the agent's name, description, tools, and system prompt.
+
+### Manage existing agents
+
+```text
+/agents manage
+```
+
+Opens an interactive dialog to view, edit, and delete configured Subagents.
+
+---
+
+## Storage locations
+
+Subagents are stored as Markdown files in two locations:
+
+| Location | Scope | Priority |
+| --- | --- | --- |
+| `.qwen/agents/` | Project-level | Higher (takes precedence) |
+| `~/.qwen/agents/` | User-level | Lower (fallback) |
+
+Project-level agents can be committed to git and shared with your team.
+
+---
+
+## Agent file format
+
+Subagents are configured with a Markdown file using YAML frontmatter:
+
+```markdown
+---
+name: agent-name
+description: Brief description of when and how to use this agent
+tools:
+  - tool1
+  - tool2
+  - tool3
+---
+
+System prompt content goes here.
+Multiple paragraphs are supported.
+You can use ${variable} templating for dynamic content.
+```
+
+### Supported template variables
+
+| Variable | Value |
+| --- | --- |
+| `${project_name}` | Name of the current project |
+| `${task_description}` | Description of the delegated task |
+| `${current_directory}` | Working directory path |
+| `${timestamp}` | Current date and time |
+
+---
+
+## Example Subagents
+
+### Testing specialist
+
+```markdown
+---
+name: testing-expert
+description: Writes comprehensive unit tests, integration tests, and handles test automation with best practices
+tools:
+  - read_file
+  - write_file
+  - read_many_files
+  - run_shell_command
+---
+
+You are a testing specialist focused on creating high-quality, maintainable tests.
+
+Your expertise includes:
+
+- Unit testing with appropriate mocking and isolation
+- Integration testing for component interactions
+- Test-driven development practices
+- Edge case identification and comprehensive coverage
+- Performance and load testing when appropriate
+
+For each testing task:
+
+1. Analyze the code structure and dependencies
+2. Identify key functionality, edge cases, and error conditions
+3. Create comprehensive test suites with descriptive names
+4. Include proper setup/teardown and meaningful assertions
+5. Add comments explaining complex test scenarios
+6. Ensure tests are maintainable and follow DRY principles
+```
+
+**Use cases:** "Write unit tests for the authentication service", "Create integration tests for the payment processing workflow"
+
+### Documentation writer
+
+```markdown
+---
+name: documentation-writer
+description: Creates comprehensive documentation, README files, API docs, and user guides
+tools:
+  - read_file
+  - write_file
+  - read_many_files
+  - web_search
+---
+
+You are a technical documentation specialist for ${project_name}.
+
+Your role is to create clear, comprehensive documentation that serves both
+developers and end users. Focus on:
+
+**For API Documentation:**
+- Clear endpoint descriptions with examples
+- Parameter details with types and constraints
+- Response format documentation
+- Error code explanations
+
+**For User Documentation:**
+- Step-by-step instructions
+- Installation and setup guides
+- Configuration options and examples
+- Troubleshooting sections for common issues
+```
+
+**Use cases:** "Create API documentation for the user management endpoints", "Write a comprehensive README for this project"
+
+### Code reviewer
+
+```markdown
+---
+name: code-reviewer
+description: Reviews code for best practices, security issues, performance, and maintainability
+tools:
+  - read_file
+  - read_many_files
+---
+
+You are an experienced code reviewer focused on quality, security, and maintainability.
+
+Review criteria:
+
+- **Code Structure**: Organization, modularity, and separation of concerns
+- **Performance**: Algorithmic efficiency and resource usage
+- **Security**: Vulnerability assessment and secure coding practices
+- **Best Practices**: Language/framework-specific conventions
+- **Error Handling**: Proper exception handling and edge case coverage
+- **Readability**: Clear naming, comments, and code organization
+
+Provide constructive feedback with:
+
+1. **Critical Issues**: Security vulnerabilities, major bugs
+2. **Important Improvements**: Performance issues, design problems
+3. **Minor Suggestions**: Style improvements, refactoring opportunities
+4. **Positive Feedback**: Well-implemented patterns and good practices
+```
+
+**Use cases:** "Review this authentication implementation for security issues", "Evaluate the code structure and suggest improvements"
+
+---
+
+## Using Subagents effectively
+
+### Encouraging automatic delegation
+
+The main AI uses your agent's `description` field to decide when to delegate. Include phrases like `"use PROACTIVELY"` or `"MUST BE USED"` to encourage more frequent delegation:
+
+```markdown
+description: MUST BE USED for all testing tasks. Writes comprehensive unit and integration tests with best practices.
+```
+
+### Explicit invocation
+
+Request a specific agent by name in your prompt:
+
+```text
+Let the testing-expert Subagents create unit tests for the payment module
+Have the documentation-writer Subagents update the API reference
+Get the react-specialist Subagents to optimize this component's performance
+```
+
+---
+
+## Best practices
+
+<AccordionGroup>
+  <Accordion title="Single responsibility principle">
+    Each Subagent should address one focused capability.
+
+    **Good:**
+    ```yaml
+    name: testing-expert
+    description: Writes comprehensive unit tests and integration tests
+    ```
+
+    **Avoid:**
+    ```yaml
+    name: general-helper
+    description: Helps with testing, documentation, code review, and deployment
+    ```
+
+    Focused agents produce better results and are easier to maintain.
+  </Accordion>
+  <Accordion title="Write actionable descriptions">
+    Descriptions determine when the main AI delegates to your agent.
+
+    **Good:**
+    ```yaml
+    description: Reviews code for security vulnerabilities, performance issues, and maintainability concerns
+    ```
+
+    **Avoid:**
+    ```yaml
+    description: A helpful code reviewer
+    ```
+  </Accordion>
+  <Accordion title="Be specific in the system prompt">
+    Detail the agent's expertise areas and include step-by-step approaches:
+
+    ```markdown
+    For each testing task:
+    1. Analyze the code structure and dependencies
+    2. Identify key functionality and edge cases
+    3. Create comprehensive test suites with clear naming
+    4. Include setup/teardown and proper assertions
+    ```
+  </Accordion>
+  <Accordion title="Restrict tools appropriately">
+    A code-reviewer agent that only reads files should not have `write_file` or `run_shell_command`:
+
+    ```yaml
+    tools:
+      - read_file
+      - read_many_files
+    ```
+
+    Minimal tool access improves security and keeps the agent focused.
+  </Accordion>
+</AccordionGroup>
+
+## Security considerations
+
+- **Tool restrictions** — Subagents can only access their explicitly configured tools.
+- **Sandboxing** — tool execution follows the same security model as direct tool use; combine with [sandboxing](/features/sandbox) for additional isolation.
+- **Audit trail** — all Subagent actions are visible in real-time progress output.
+- **Access control** — project and user-level separation provides appropriate boundaries.
+- **No secrets in configs** — avoid including API keys or credentials in agent files.
+
+---
+
+## Related pages
+
+<CardGroup cols={2}>
+  <Card title="Agent Skills" icon="wand-magic-sparkles" href="/features/skills">
+    Model-invoked capability packages — a complementary extension mechanism.
+  </Card>
+  <Card title="Approval modes" icon="shield-check" href="/features/approval-mode">
+    Control what tool calls Subagents can execute without confirmation.
+  </Card>
+  <Card title="Sandboxing" icon="box" href="/features/sandbox">
+    Isolate Subagent shell command execution for additional safety.
+  </Card>
+  <Card title="MCP integration" icon="plug" href="/features/mcp">
+    Add external tools that Subagents can be configured to use.
+  </Card>
+</CardGroup>

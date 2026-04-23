@@ -1,0 +1,114 @@
+{
+  "projectType": "cli-tool",
+  "projectName": "OpenGame",
+  "projectDescription": "An open-source agentic CLI framework that turns natural-language game-design prompts into fully playable web games end-to-end.",
+  "theme": "palm",
+  "primaryColor": "#94cb04",
+  "lightColor": "#545454",
+  "darkColor": null,
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "User Guide",
+        "groups": [
+          {
+            "group": "Get Started",
+            "pages": [
+              "introduction",
+              "quickstart",
+              "game-skill"
+            ]
+          },
+          {
+            "group": "Features",
+            "pages": [
+              "features/headless",
+              "features/approval-mode",
+              "features/commands",
+              "features/sandbox",
+              "features/skills",
+              "features/sub-agents",
+              "features/mcp"
+            ]
+          },
+          {
+            "group": "Configuration",
+            "pages": [
+              "configuration/api-keys",
+              "configuration/settings",
+              "configuration/auth",
+              "configuration/memory"
+            ]
+          },
+          {
+            "group": "Support",
+            "pages": [
+              "support/troubleshooting",
+              "support/faq"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "Developer Guide",
+        "groups": [
+          {
+            "group": "Architecture",
+            "pages": [
+              "developers/architecture",
+              "developers/contributing",
+              "developers/roadmap"
+            ]
+          },
+          {
+            "group": "SDK & Extensions",
+            "pages": [
+              "developers/sdk-typescript",
+              "developers/extensions/getting-started",
+              "developers/extensions/extension",
+              "developers/extensions/releasing"
+            ]
+          },
+          {
+            "group": "Built-in Tools",
+            "pages": [
+              "developers/tools/introduction",
+              "developers/tools/file-system",
+              "developers/tools/shell",
+              "developers/tools/web-fetch",
+              "developers/tools/mcp-server"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "keyFeatures": [
+    "Prompt-to-playable-game: describe a game in plain language and OpenGame builds it end-to-end",
+    "Game Skill: Template Skill scaffolds stable project architectures; Debug Skill systematically fixes runtime errors",
+    "GameCoder-27B: a code LLM fine-tuned for game engine APIs, scaffolding, and bug-fix workflows",
+    "OpenGame-Bench: evaluation pipeline scoring Build Health, Visual Usability, and Intent Alignment via headless browser",
+    "Headless / scriptable mode: run opengame -p '...' for CI, batch generation, and benchmark runs",
+    "Multi-modal asset generation: independent providers for image, video, audio, and reasoning modalities",
+    "MCP integration: connect to external tools and data sources via Model Context Protocol",
+    "Agent Skills: extensible, modular capabilities that can be shared via git",
+    "Subagents: specialized AI assistants that handle focused tasks with controlled tool access",
+    "Approval modes: Plan, Default, Auto-Edit, and YOLO for fine-grained permission control"
+  ],
+  "publicApiSurface": [
+    "opengame (CLI binary) — interactive and headless game generation",
+    "opengame -p / --prompt — headless single-shot game generation",
+    "opengame --yolo / --approval-mode — permission mode control",
+    "opengame mcp add/list/remove — MCP server management",
+    "opengame --experimental-skills — enable Agent Skills",
+    "@opengame/sdk query(config) — programmatic TypeScript SDK",
+    "QueryOptions: cwd, model, permissionMode, canUseTool, mcpServers, abortController",
+    "tool(name, description, inputSchema, handler) — SDK MCP tool factory",
+    "createSdkMcpServer(options) — SDK-embedded MCP server",
+    "OPENGAME_<MODALITY>_PROVIDER / _API_KEY / _BASE_URL / _MODEL — asset provider env vars",
+    "OPENAI_API_KEY / OPENAI_BASE_URL / OPENAI_MODEL — main agent LLM configuration",
+    ".qwen/settings.json / ~/.qwen/settings.json — project and user settings files",
+    "/auth, /help, /compress, /clear, /theme, /language, /quit — interactive slash commands",
+    "/agents create, /agents manage — subagent management commands"
+  ]
+}

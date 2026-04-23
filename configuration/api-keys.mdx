@@ -1,0 +1,221 @@
+---
+title: 'API Keys and Provider Configuration for OpenGame'
+description: "Configure credentials for OpenGame's four generative modalities — reasoning, image, video, and audio — using DashScope, Doubao, or any OpenAI-compatible provider."
+---
+
+OpenGame does not ship with any default credentials. Every AI capability — from reasoning and game design to image generation, video animation, and music — requires you to supply your own API keys. This gives you full control over which providers and models you use, and lets you mix and match across modalities independently. There are four configurable modalities plus a separate main-agent LLM, each resolved from its own chain of environment variables and settings.
+
+## Modalities at a glance
+
+OpenGame routes four distinct generative tasks to independently configured providers:
+
+| Modality | Used for | Required? |
+|---|---|---|
+| `reasoning` | `classify-game-type`, `generate-gdd`, ABC notation generation | Required for non-trivial games |
+| `image` | Backgrounds, sprites, animation base frames, tilesets | Required for any asset generation |
+| `video` | Image-to-video (animation frames) and text-to-video (audio source) | Optional — without it, animations fall back to I2I and audio to ABC/local |
+| `audio` | LLM that writes ABC music notation (rendered locally to WAV) | Optional — without it, audio falls back to procedural placeholders |
+
+The main agent LLM — the model driving the conversation loop itself — is not part of this system. It uses the upstream qwen-code OpenAI-compatible flow, configured separately via `OPENAI_API_KEY` / `OPENAI_BASE_URL` / `OPENAI_MODEL`, or the interactive `/auth` command.
+
+## Supported providers
+
+<AccordionGroup>
+  <Accordion title="tongyi — Aliyun DashScope">
+    The DashScope platform hosts the Wan and Qwen model families. Use `tongyi` when you want to run Wan2.5 image/video models or Qwen reasoning models via Aliyun.
+
+    **Supported modalities:** reasoning, image, video, audio
+
+    For `tongyi`, `OPENGAME_<MODALITY>_BASE_URL` and `OPENGAME_<MODALITY>_MODEL` are optional — DashScope defaults are used when omitted.
+  </Accordion>
+  <Accordion title="doubao — Volcengine ARK">
+    The Volcengine ARK platform hosts the Doubao Seedream (image) and Seedance (video) model families.
+
+    **Supported modalities:** reasoning, image, video, audio
+
+    For `doubao`, `OPENGAME_<MODALITY>_BASE_URL` and `OPENGAME_<MODALITY>_MODEL` are optional for most endpoints.
+  </Accordion>
+  <Accordion title="openai-compat — Any OpenAI-shaped API">
+    Any endpoint that speaks the OpenAI REST shape: OpenAI, OpenRouter, Together, fal.ai shims, Stability proxies, and others. `OPENGAME_<MODALITY>_BASE_URL` and `OPENGAME_<MODALITY>_MODEL` are **required** when using this provider.
+
+    **Supported modalities:** reasoning, image, audio
+
+    <Warning>
+      `openai-compat` is not wired up for video. There is no stable OpenAI-shaped public video API today (Sora and Veo are not part of that surface). Setting `OPENGAME_VIDEO_PROVIDER=openai-compat` will produce a clear error.
+    </Warning>
+  </Accordion>
+</AccordionGroup>
+
+## Environment variable reference
+
+Each modality reads four environment variables. Replace `<MODALITY>` with `REASONING`, `IMAGE`, `VIDEO`, or `AUDIO`:
+
+<ParamField path="OPENGAME_<MODALITY>_PROVIDER" type="string" required>
+  The provider family to use. One of `tongyi`, `doubao`, or `openai-compat`.
+</ParamField>
+
+<ParamField path="OPENGAME_<MODALITY>_API_KEY" type="string" required>
+  The Bearer token sent to the provider's API.
+</ParamField>
+
+<ParamField path="OPENGAME_<MODALITY>_BASE_URL" type="string">
+  Base URL for the provider endpoint. Required when using `openai-compat`; an optional override for `tongyi` and `doubao`.
+</ParamField>
+
+<ParamField path="OPENGAME_<MODALITY>_MODEL" type="string">
+  The model identifier to request. Required when using `openai-compat`; an optional override for `tongyi` and `doubao`.
+</ParamField>
+
+### Main agent LLM variables
+
+<ParamField path="OPENAI_API_KEY" type="string" required>
+  API key for the main agent LLM. Used by the qwen-code conversation loop, not by asset tools.
+</ParamField>
+
+<ParamField path="OPENAI_BASE_URL" type="string">
+  Base URL for the main agent LLM endpoint. Defaults to `https://api.openai.com/v1`.
+</ParamField>
+
+<ParamField path="OPENAI_MODEL" type="string">
+  Model identifier for the main agent LLM. Defaults to `gpt-4o`.
+</ParamField>
+
+## Configuration examples
+
+<CodeGroup>
+
+```bash All on Aliyun DashScope
+export OPENGAME_REASONING_PROVIDER=tongyi
+export OPENGAME_REASONING_API_KEY=sk-aliyun-key
+export OPENGAME_REASONING_MODEL=deepseek-v3.2
+
+export OPENGAME_IMAGE_PROVIDER=tongyi
+export OPENGAME_IMAGE_API_KEY=sk-aliyun-key
+export OPENGAME_IMAGE_MODEL=wan2.5-t2i-preview
+
+export OPENGAME_VIDEO_PROVIDER=tongyi
+export OPENGAME_VIDEO_API_KEY=sk-aliyun-key
+export OPENGAME_VIDEO_MODEL=wan2.5-i2v-preview
+
+export OPENGAME_AUDIO_PROVIDER=tongyi
+export OPENGAME_AUDIO_API_KEY=sk-aliyun-key
+export OPENGAME_AUDIO_MODEL=qwen-plus
+```
+
+```bash Mix-and-match (OpenAI reasoning + Doubao image/video)
+export OPENGAME_REASONING_PROVIDER=openai-compat
+export OPENGAME_REASONING_API_KEY=sk-openai-key
+export OPENGAME_REASONING_BASE_URL=https://api.openai.com/v1
+export OPENGAME_REASONING_MODEL=gpt-4o-mini
+
+export OPENGAME_IMAGE_PROVIDER=doubao
+export OPENGAME_IMAGE_API_KEY=volc-key
+export OPENGAME_IMAGE_MODEL=doubao-seedream-4-0-250828
+
+export OPENGAME_VIDEO_PROVIDER=doubao
+export OPENGAME_VIDEO_API_KEY=volc-key
+export OPENGAME_VIDEO_MODEL=doubao-seedance-1-0-pro-250528
+
+# Reuse OpenAI for ABC notation generation
+export OPENGAME_AUDIO_PROVIDER=openai-compat
+export OPENGAME_AUDIO_API_KEY=sk-openai-key
+export OPENGAME_AUDIO_BASE_URL=https://api.openai.com/v1
+export OPENGAME_AUDIO_MODEL=gpt-4o-mini
+```
+
+```bash fal.ai image proxy (openai-compat)
+export OPENGAME_IMAGE_PROVIDER=openai-compat
+export OPENGAME_IMAGE_API_KEY=$FAL_KEY
+export OPENGAME_IMAGE_BASE_URL=https://fal.run/openai/v1
+export OPENGAME_IMAGE_MODEL=fal-ai/flux/dev
+```
+
+</CodeGroup>
+
+<Tip>
+  A copy-paste template for all variables is available in the repository root at `.env.example`.
+</Tip>
+
+## Configuring via settings.json
+
+The same provider fields can be persisted to your settings file. Environment variables take precedence over `settings.json`, so the file is the right place for default choices you want to override per-shell.
+
+```json ~/.qwen/settings.json
+{
+  "openGame": {
+    "providers": {
+      "reasoning": {
+        "provider": "openai-compat",
+        "apiKey": "sk-openai-key",
+        "baseUrl": "https://api.openai.com/v1",
+        "model": "gpt-4o-mini"
+      },
+      "image": {
+        "provider": "tongyi",
+        "apiKey": "sk-aliyun-key",
+        "model": "wan2.5-t2i-preview"
+      },
+      "video": {
+        "provider": "doubao",
+        "apiKey": "volc-key",
+        "model": "doubao-seedance-1-0-pro-250528"
+      },
+      "audio": {
+        "provider": "openai-compat",
+        "apiKey": "sk-openai-key",
+        "baseUrl": "https://api.openai.com/v1",
+        "model": "gpt-4o-mini"
+      }
+    }
+  }
+}
+```
+
+You can also reference environment variables directly inside `settings.json` using `$VAR_NAME` or `${VAR_NAME}` syntax, which is resolved at load time:
+
+```json Using env var references in settings.json
+{
+  "openGame": {
+    "providers": {
+      "image": {
+        "provider": "tongyi",
+        "apiKey": "$DASHSCOPE_API_KEY",
+        "model": "wan2.5-t2i-preview"
+      }
+    }
+  }
+}
+```
+
+## Resolution rules
+
+For each modality, OpenGame walks the following list and uses the first non-empty value found:
+
+1. `OPENGAME_<MODALITY>_PROVIDER` environment variable.
+2. `openGame.providers.<modality>.provider` in `settings.json`.
+3. Legacy fallback — if a DashScope-style key (`DASHSCOPE_API_KEY`, `IMAGE_MODEL_API_KEY`, `REASONING_MODEL_API_KEY`, etc.) is present, the provider is inferred as `tongyi` so existing setups keep working.
+4. If none of the above are set, OpenGame raises `MissingProviderConfigError` naming the exact variable or settings field to set.
+
+The same precedence chain applies independently to `_API_KEY`, `_BASE_URL`, and `_MODEL`.
+
+<Note>
+  You'll only see a configuration error when the agent actually invokes an asset or classifier tool — not on startup. The error message is human-readable and tells you the exact variable to set:
+
+  ```
+  OpenGame is missing API configuration for the "image" modality.
+
+  Set OPENGAME_IMAGE_PROVIDER to one of "tongyi", "doubao", or "openai-compat",
+  or add an "openGame.providers.image.provider" entry to your settings.json.
+  ```
+</Note>
+
+## Legacy environment variables
+
+Earlier OpenGame setups used a different set of variable names. These are still read as fallbacks but new configurations should use the `OPENGAME_*` names above. They may be removed in a future major version.
+
+| Modality | Legacy fallbacks (checked in order) |
+|---|---|
+| `reasoning` | `REASONING_MODEL_API_KEY` → `DASHSCOPE_API_KEY` → `OPENAI_API_KEY` |
+| `image` | `IMAGE_MODEL_API_KEY` → `DASHSCOPE_API_KEY` |
+| `video` | `VIDEO_MODEL_API_KEY` → `IMAGE_MODEL_API_KEY` → `DASHSCOPE_API_KEY` |
+| `audio` | `AUDIO_MODEL_API_KEY` → `IMAGE_MODEL_API_KEY` → `DASHSCOPE_API_KEY` |

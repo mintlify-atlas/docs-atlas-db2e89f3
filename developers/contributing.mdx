@@ -1,0 +1,287 @@
+---
+title: 'Contributing to OpenGame: Setup, Standards, and PR Process'
+description: 'Everything you need to clone, build, test, and submit changes to OpenGame—from Node.js prerequisites to pull request guidelines and debugging tools.'
+---
+
+OpenGame is an open-source project and welcomes patches from the community. All submissions—including those from core maintainers—go through the same pull request review process. This page walks you through setting up a local development environment, running the test suite, following the project's coding conventions, and submitting a PR that will move quickly through review.
+
+## Before you write code
+
+Every PR must be linked to an existing issue in the tracker. This ensures that the change has been discussed and is aligned with the project's goals before any code is written.
+
+<Note>
+  If an issue for your change does not exist, open one first and wait for maintainer feedback before you start coding. PRs without a linked issue may be closed.
+</Note>
+
+- **Bug fixes** — link to the bug report issue.
+- **New features** — link to a feature request or proposal that a maintainer has approved.
+
+Favor small, focused PRs. A PR should fix one bug or add one self-contained feature. Bundle unrelated changes and it will take longer to review. Large changes should be broken into a series of smaller PRs that can be merged independently.
+
+## Development setup
+
+### Prerequisites
+
+| Dependency | Version requirement |
+|---|---|
+| Node.js (development) | `~20.19.0` (exact, due to an upstream dev dependency constraint) |
+| Node.js (production) | `>=20` |
+| Git | Any recent version |
+
+Use [nvm](https://github.com/nvm-sh/nvm) to manage Node.js versions if you work across multiple projects.
+
+<Tip>
+  Install the git pre-commit hook immediately after cloning. It runs `npm run preflight` before every commit so you never push code that fails CI.
+</Tip>
+
+### Clone and install
+
+<Steps>
+  <Step title="Clone the repository">
+    ```bash
+    git clone https://github.com/leigest519/OpenGame.git
+    cd OpenGame
+    ```
+  </Step>
+  <Step title="Install dependencies">
+    ```bash
+    npm install
+    ```
+    This installs root-level dev dependencies and all workspace package dependencies defined in `package.json`.
+  </Step>
+  <Step title="Build the project">
+    ```bash
+    npm run build
+    ```
+    Compiles TypeScript to JavaScript, bundles assets, and prepares all packages for execution. The build script is at `scripts/build.js`.
+  </Step>
+  <Step title="Start the CLI">
+    ```bash
+    npm start
+    ```
+    Runs the compiled CLI from source. To make the `opengame` command available globally outside the project directory, run `npm link path/to/OpenGame/packages/cli`.
+  </Step>
+  <Step title="Add the pre-commit hook (recommended)">
+    ```bash
+    echo "
+    # Run npm build and check for errors
+    if ! npm run preflight; then
+      echo \"npm build failed. Commit aborted.\"
+      exit 1
+    fi
+    " > .git/hooks/pre-commit && chmod +x .git/hooks/pre-commit
+    ```
+  </Step>
+</Steps>
+
+### Build variants
+
+<Tabs>
+  <Tab title="Standard build">
+    ```bash
+    npm run build
+    ```
+    Compiles all packages. Does not build the sandbox container. Use this for most development work.
+  </Tab>
+  <Tab title="Full build with sandbox">
+    ```bash
+    npm run build:all
+    ```
+    Builds the `opengame` CLI and the sandbox container image. Requires Docker or Podman. Needed if you are working on sandboxed tool execution.
+  </Tab>
+  <Tab title="Dev server (docs)">
+    ```bash
+    cd docs-site
+    npm install
+    npm run link
+    npm run dev
+    ```
+    Starts a local documentation preview server at `http://localhost:3000`. The `npm run link` step creates a symlink from `../docs` to `content` in the docs-site project so changes to docs files are reflected immediately.
+  </Tab>
+</Tabs>
+
+## Project structure
+
+```
+OpenGame/
+├── packages/
+│   ├── cli/          # Terminal UI, input parsing, display rendering
+│   ├── core/         # Model API client, tool registry, state management
+│   └── sdk-typescript/  # QwenCode SDK for third-party integration
+├── agent-test/       # Agent integration tests and game templates
+├── docs/             # Project documentation source
+├── scripts/          # Build, test, and release utility scripts
+└── package.json      # Root workspace configuration
+```
+
+The npm workspace configuration in `package.json` covers `packages/*` and `agent-test`. ESLint enforces import boundaries between packages—relative imports that cross package boundaries are flagged as errors.
+
+## Testing
+
+### Unit tests
+
+Unit tests live alongside source files in `packages/core` and `packages/cli`. They run with [vitest](https://vitest.dev/).
+
+```bash
+npm run test
+```
+
+Ensure tests pass before submitting any changes. For a complete quality check, use `npm run preflight` instead, which also covers linting, type checking, and formatting.
+
+### Integration (end-to-end) tests
+
+Integration tests validate end-to-end functionality and are not included in the default `npm run test` run.
+
+```bash
+npm run test:e2e
+```
+
+This runs `test:integration:sandbox:none` with verbose output and preserved output artifacts. Sandbox-specific variants are also available:
+
+<Tabs>
+  <Tab title="No sandbox">
+    ```bash
+    npm run test:integration:sandbox:none
+    ```
+  </Tab>
+  <Tab title="Docker sandbox">
+    ```bash
+    npm run test:integration:sandbox:docker
+    ```
+  </Tab>
+  <Tab title="Podman sandbox">
+    ```bash
+    npm run test:integration:sandbox:podman
+    ```
+  </Tab>
+</Tabs>
+
+### Agent tests
+
+The `agent-test` workspace contains agent-level tests for evaluating game generation quality. These tests are run separately from the standard test suite and are used to validate Game Skill behavior and model integration.
+
+## Code quality
+
+### Preflight (run before every PR)
+
+```bash
+npm run preflight
+```
+
+This single command runs the full quality gate: `clean` → `npm ci` → `format` → `lint:ci` → `build` → `typecheck` → `test:ci`. All checks must pass before a PR can be merged.
+
+### Individual commands
+
+<CardGroup cols={2}>
+  <Card title="Lint" icon="search-code" href="/developers/contributing">
+    ```bash
+    npm run lint
+    ```
+    Runs ESLint on all `.ts` and `.tsx` files including `integration-tests/`.
+  </Card>
+  <Card title="Format" icon="paintbrush" href="/developers/contributing">
+    ```bash
+    npm run format
+    ```
+    Runs Prettier across the entire project. Run this before committing.
+  </Card>
+  <Card title="Type check" icon="check-circle" href="/developers/contributing">
+    ```bash
+    npm run typecheck
+    ```
+    Runs `tsc --noEmit` across all workspace packages to catch type errors without emitting output files.
+  </Card>
+  <Card title="Lint fix" icon="wrench" href="/developers/contributing">
+    ```bash
+    npm run lint:fix
+    ```
+    Runs ESLint with `--fix` to auto-correct fixable violations before manual review.
+  </Card>
+</CardGroup>
+
+### Coding conventions
+
+- Match the style, patterns, and conventions already present in the file you are editing.
+- **TypeScript** is required for all new code. Do not add `.js` source files.
+- **Import paths** — ESLint enforces restrictions on cross-package relative imports. Use the package's public index entry point, not deep relative paths into another package.
+- **Commit messages** — Follow the [Conventional Commits](https://www.conventionalcommits.org/) standard: `feat(cli): Add --json flag to 'config get' command`. Scope is the affected package or area.
+
+## Debugging
+
+### VS Code
+
+The repository includes a `.vscode/launch.json` with two launch configurations:
+
+- **F5 (recommended)** — Launches the CLI directly from VS Code for interactive debugging.
+- **Attach** — Attach the VS Code debugger to a process already running with `--inspect-brk`.
+
+To start the CLI in debug mode from the terminal:
+
+```bash
+npm run debug
+```
+
+This runs `node --inspect-brk dist/index.js` inside `packages/cli`, pausing execution until a debugger attaches. Open `chrome://inspect` in Chrome to connect.
+
+To debug inside the sandbox container:
+
+```bash
+DEBUG=1 opengame
+```
+
+<Warning>
+  If you have `DEBUG=true` in a project's `.env` file, it will not affect OpenGame—the runtime automatically excludes it. Use `.qwen/.env` files for OpenGame-specific debug settings.
+</Warning>
+
+### React DevTools
+
+The CLI's terminal UI is built on Ink (React for terminals) and is compatible with React DevTools 4.x.
+
+<Steps>
+  <Step title="Start the CLI in development mode">
+    ```bash
+    DEV=true npm start
+    ```
+  </Step>
+  <Step title="Run React DevTools">
+    ```bash
+    npx react-devtools@4.28.5
+    ```
+    The running CLI application connects automatically to the DevTools window.
+  </Step>
+</Steps>
+
+## Submitting a pull request
+
+<Steps>
+  <Step title="Link to an existing issue">
+    In your PR description, reference the issue with `Fixes #123` or `Closes #123`. PRs without a linked issue may be closed.
+  </Step>
+  <Step title="Use a draft PR for early feedback">
+    Open a [Draft Pull Request](https://docs.github.com/articles/about-pull-requests) if you want early feedback before the implementation is complete. This signals to maintainers that the PR is not ready for formal review.
+  </Step>
+  <Step title="Run the preflight check">
+    ```bash
+    npm run preflight
+    ```
+    All checks must pass locally before you request review.
+  </Step>
+  <Step title="Update documentation">
+    If your change introduces a user-facing behavior change (new command, modified flag, changed default), update the relevant pages in `/docs`. Documentation updates are required, not optional.
+  </Step>
+  <Step title="Write a clear PR title and description">
+    Follow Conventional Commits for the title: `feat(cli): Add --json flag to 'config get' command`. In the body, explain the "why" behind the change, not just the "what," and link to the relevant issue.
+  </Step>
+</Steps>
+
+## Manual publish
+
+A build artifact is published to the internal registry on each commit. If you need to cut a local build manually:
+
+```bash
+npm run clean
+npm install
+npm run auth
+npm run prerelease:dev
+npm publish --workspaces
+```

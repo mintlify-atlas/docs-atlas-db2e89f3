@@ -1,0 +1,158 @@
+---
+title: 'Authentication — Connecting OpenGame to a Language Model'
+description: "Connect OpenGame to a language model using Qwen OAuth or an OpenAI-compatible API key. Covers env vars, the /auth command, .env loading, and CI/headless use."
+---
+
+OpenGame's main agent — the LLM that drives the conversation loop, plans tool calls, and writes the game — requires its own authentication separate from the asset-generation providers. Two authentication methods are available: Qwen OAuth for the simplest browser-based setup, and an OpenAI-compatible API key for any provider that speaks the OpenAI REST shape. You can switch between them at any time without restarting the CLI.
+
+## Choosing an authentication method
+
+<CardGroup cols={2}>
+  <Card title="Qwen OAuth" icon="browser" href="/configuration/auth#option-1-qwen-oauth">
+    Sign in with your qwen.ai account in a browser. No API key management required. Free with a quota of 60 requests/minute and 2,000 requests/day.
+  </Card>
+  <Card title="OpenAI-compatible API" icon="key" href="/configuration/auth#option-2-openai-compatible-api">
+    Use any OpenAI-shaped endpoint: OpenAI, Azure OpenAI, OpenRouter, ModelScope, Alibaba Cloud Bailian, or a self-hosted compatible server.
+  </Card>
+</CardGroup>
+
+## Option 1: Qwen OAuth
+
+Qwen OAuth is the recommended method for local use. On first launch, OpenGame opens a browser login page. After you authenticate, credentials are cached locally so you won't need to log in again on subsequent sessions.
+
+**Requirements:** a `qwen.ai` account and internet access for the initial login.
+
+**Quota:** free, with a limit of 60 requests per minute and 2,000 requests per day.
+
+<Steps>
+  <Step title="Start OpenGame">
+    Run the CLI from your project directory:
+
+    ```bash
+    opengame
+    ```
+  </Step>
+  <Step title="Complete the browser flow">
+    OpenGame opens a browser window to the qwen.ai login page. Sign in with your account. Once complete, you are redirected back and credentials are cached.
+  </Step>
+  <Step title="Continue working">
+    The CLI resumes automatically. You will not need to log in again until the cached credentials expire.
+  </Step>
+</Steps>
+
+## Option 2: OpenAI-compatible API
+
+Use this method when you want to use a specific model or provider rather than the default Qwen OAuth flow. Any endpoint that implements the OpenAI REST shape is supported.
+
+### Environment variables
+
+The most reliable way to configure the API key, especially for CI, containers, or shared machines:
+
+<ParamField path="OPENAI_API_KEY" type="string" required>
+  Your API key for the main agent LLM.
+</ParamField>
+
+<ParamField path="OPENAI_BASE_URL" type="string">
+  Base URL for the OpenAI-compatible endpoint. Defaults to `https://api.openai.com/v1` when not set.
+</ParamField>
+
+<ParamField path="OPENAI_MODEL" type="string">
+  Model identifier to request. Defaults to `gpt-4o` when not set.
+</ParamField>
+
+```bash Setting env vars in your shell
+export OPENAI_API_KEY="your-api-key-here"
+export OPENAI_BASE_URL="https://api.openai.com/v1"  # optional
+export OPENAI_MODEL="gpt-4o"                        # optional
+```
+
+### .env file loading
+
+OpenGame auto-loads environment variables from the **first** `.env` file it finds. Variables are not merged across multiple files — only the first match is used.
+
+**Search order:**
+
+1. Walk upward from the current directory toward `/`:
+   1. `.qwen/.env`
+   2. `.env`
+2. If nothing is found, fall back to the home directory:
+   - `~/.qwen/.env`
+   - `~/.env`
+
+`.qwen/.env` is recommended because it keeps OpenGame variables isolated from other tools in the same project. Some variables (`DEBUG`, `DEBUG_MODE`) are excluded from project `.env` files by default to prevent interference with CLI behavior; they are never excluded from `.qwen/.env`.
+
+<Tabs>
+  <Tab title="Project-specific">
+    ```bash .qwen/.env (project-specific, recommended)
+    OPENAI_API_KEY="your-api-key"
+    OPENAI_BASE_URL="https://api-inference.modelscope.cn/v1"
+    OPENAI_MODEL="Qwen/Qwen3-Coder-480B-A35B-Instruct"
+    ```
+  </Tab>
+  <Tab title="User-wide">
+    ```bash ~/.qwen/.env (available in all projects)
+    OPENAI_API_KEY="your-api-key"
+    OPENAI_BASE_URL="https://dashscope.aliyuncs.com/compatible-mode/v1"
+    OPENAI_MODEL="qwen3-coder-plus"
+    ```
+  </Tab>
+</Tabs>
+
+### Command-line arguments
+
+You can also pass credentials directly when launching the CLI. These override any environment variables for that session only:
+
+```bash
+# API key only
+qwen-code --openai-api-key "your-api-key-here"
+
+# Custom endpoint
+qwen-code --openai-api-key "your-api-key-here" --openai-base-url "https://your-endpoint.com/v1"
+
+# Custom model
+qwen-code --openai-api-key "your-api-key-here" --model "gpt-4o-mini"
+```
+
+### Running a local model (GameCoder-27B)
+
+To use a locally hosted model with an OpenAI-compatible server, point `OPENAI_BASE_URL` at your local endpoint and set `OPENAI_MODEL` to match the model name served by your runtime:
+
+```bash .qwen/.env
+OPENAI_API_KEY="local"
+OPENAI_BASE_URL="http://localhost:11434/v1"
+OPENAI_MODEL="gamecoder-27b"
+```
+
+No internet access is required once the model is running locally.
+
+## Switching authentication method mid-session
+
+You can change the authentication method without restarting OpenGame. Run the `/auth` command from the interactive prompt:
+
+```
+/auth
+```
+
+This opens the same selection dialog shown on first launch, allowing you to switch between Qwen OAuth and the OpenAI-compatible API flow.
+
+## Non-interactive and headless environments
+
+In CI pipelines, SSH sessions, or containers, the OAuth browser flow is not available. Use the OpenAI-compatible API method via environment variables:
+
+```bash
+export OPENAI_API_KEY="your-api-key-here"
+export OPENAI_BASE_URL="https://api.openai.com/v1"
+export OPENAI_MODEL="gpt-4o"
+```
+
+If none of `OPENAI_API_KEY`, `OPENAI_BASE_URL`, or `OPENAI_MODEL` are set in a non-interactive session, OpenGame exits with an error explaining what to configure.
+
+## Security notes
+
+<Warning>
+  Never commit API keys to version control. Use `.qwen/.env` for project-local secrets and add it to your `.gitignore`. The CLI may display keys in plain text during the interactive auth flow — ensure your terminal session is not being recorded or shared.
+</Warning>
+
+- Prefer `.qwen/.env` over root-level `.env` to keep OpenGame secrets separate from other tooling.
+- For CI environments, use your platform's secrets management (GitHub Actions secrets, GitLab CI variables, etc.) to inject `OPENAI_API_KEY` as an environment variable.
+- The `security.auth.enforcedType` setting in `settings.json` allows enterprise administrators to require a specific authentication type for all users.

@@ -1,0 +1,296 @@
+---
+title: 'Shell Command Execution Tool — OpenGame Developer Guide'
+description: "How OpenGame executes shell commands via run_shell_command: approval gates, background processes, command allow/deny lists, interactive shell mode, and security tips."
+---
+
+The `run_shell_command` tool lets the OpenGame agent execute arbitrary shell commands on your machine. During game generation it is used for tasks such as installing npm packages, running a Vite dev server in the background, invoking build scripts, and running the test suite to verify generated code. Because shell access carries significant risk, OpenGame applies an explicit approval model and provides granular configuration options to restrict which commands the agent may run.
+
+<Warning>
+`run_shell_command` can execute any command the CLI user can run. Review the confirmation dialog carefully before approving, and use the command restriction settings described below to enforce a least-privilege policy in automated or shared environments.
+</Warning>
+
+## Tool reference
+
+**Tool name:** `run_shell_command` | **Display name:** `Shell` | **File:** `shell.ts` | **Confirmation:** Yes
+
+On Linux and macOS commands are executed with `bash -c`. On Windows they are executed with `cmd.exe /c`.
+
+### Parameters
+
+<ParamField path="command" type="string" required>
+  The exact shell command to execute (e.g. `"npm install"`, `"npx vite build"`).
+</ParamField>
+
+<ParamField path="description" type="string">
+  A brief human-readable description of the command's purpose, shown to you in the confirmation dialog.
+</ParamField>
+
+<ParamField path="directory" type="string">
+  Working directory relative to the project root in which to run the command. Defaults to the project root.
+</ParamField>
+
+<ParamField path="is_background" type="boolean" required>
+  Whether to run the command in the background. **This parameter is required for every invocation.** Set to `true` for long-running processes (dev servers, watchers). Set to `false` for one-shot commands that must complete before the agent proceeds.
+</ParamField>
+
+### Execution return value
+
+The tool returns a structured object with the following fields:
+
+| Field | Description |
+|---|---|
+| `Command` | The command that was executed |
+| `Directory` | The directory where it ran |
+| `Stdout` | Standard output |
+| `Stderr` | Standard error |
+| `Error` | Subprocess error message, if any |
+| `Exit Code` | Process exit code |
+| `Signal` | Signal number if the process was terminated by a signal |
+| `Background PIDs` | PIDs of any background processes that were started |
+
+### Environment variables
+
+Every subprocess spawned by `run_shell_command` receives a `QWEN_CODE=1` environment variable. Scripts and tools can use this to detect that they are running inside the OpenGame CLI.
+
+---
+
+## Background vs foreground execution
+
+The `is_background` parameter is **required** and must be set explicitly. This design forces the agent — and you — to make an intentional decision about execution mode, avoiding accidental blocking when dealing with long-running processes.
+
+<Tabs>
+  <Tab title="Background (is_background: true)">
+    Use for processes that should keep running after the tool call returns:
+
+    ```bash
+    # Development server
+    run_shell_command(
+      command="npm run dev",
+      description="Start Vite dev server",
+      is_background=true
+    )
+
+    # Build watcher
+    run_shell_command(
+      command="npm run watch",
+      description="Watch for changes and rebuild",
+      is_background=true
+    )
+
+    # Docker Compose stack
+    run_shell_command(
+      command="docker-compose up",
+      description="Start all services",
+      is_background=true
+    )
+    ```
+
+    Background process PIDs are returned in `Background PIDs` so you can inspect or stop them later.
+  </Tab>
+  <Tab title="Foreground (is_background: false)">
+    Use for one-shot commands that must complete before the agent continues:
+
+    ```bash
+    # Install dependencies
+    run_shell_command(
+      command="npm install",
+      description="Install project dependencies",
+      is_background=false
+    )
+
+    # Run tests
+    run_shell_command(
+      command="npm test",
+      description="Run the test suite",
+      is_background=false
+    )
+
+    # Build for production
+    run_shell_command(
+      command="npm run build",
+      description="Build the project",
+      is_background=false
+    )
+    ```
+  </Tab>
+</Tabs>
+
+<Tip>
+You can also append `&` to a command string to force background execution regardless of `is_background`. However, using `is_background=true` is preferred because it provides clearer intent and handles PIDs automatically.
+</Tip>
+
+---
+
+## The approval gate
+
+Before executing any shell command, OpenGame presents a confirmation dialog showing the command, its description, and the working directory. You can:
+
+- **Proceed once** — approve this single invocation.
+- **Always allow this command** — add the command prefix to the session allowlist.
+- **Cancel** — abort the tool call.
+
+The approval gate is represented in `packages/core/src/tools/tools.ts` by `ToolConfirmationOutcome`:
+
+```typescript
+export enum ToolConfirmationOutcome {
+  ProceedOnce           = 'proceed_once',
+  ProceedAlways         = 'proceed_always',
+  ProceedAlwaysServer   = 'proceed_always_server',
+  ProceedAlwaysTool     = 'proceed_always_tool',
+  ModifyWithEditor      = 'modify_with_editor',
+  Cancel                = 'cancel',
+}
+```
+
+---
+
+## Command restriction settings
+
+You can restrict which commands the agent is allowed to run by editing `settings.json`. The validation logic chains `tools.core` (allowlist) and `tools.exclude` (blocklist), with the blocklist taking precedence.
+
+### Validation rules
+
+1. **Command chaining is split and validated separately.** Commands joined by `&&`, `||`, or `;` are each checked individually. If any part is blocked, the entire chain is rejected.
+2. **Prefix matching.** Allowing `git` permits `git status`, `git log`, and any other `git` subcommand.
+3. **Blocklist takes precedence.** If a prefix appears in both `tools.core` and `tools.exclude`, it is blocked.
+
+### Examples
+
+<AccordionGroup>
+  <Accordion title="Allow only specific command prefixes">
+    Restrict the agent to `git` and `npm` commands only:
+
+    ```json
+    {
+      "tools": {
+        "core": ["run_shell_command(git)", "run_shell_command(npm)"]
+      }
+    }
+    ```
+
+    | Command | Result |
+    |---|---|
+    | `git status` | Allowed |
+    | `npm install` | Allowed |
+    | `ls -l` | Blocked |
+  </Accordion>
+  <Accordion title="Block specific command prefixes">
+    Allow everything except `rm`:
+
+    ```json
+    {
+      "tools": {
+        "core": ["run_shell_command"],
+        "exclude": ["run_shell_command(rm)"]
+      }
+    }
+    ```
+
+    | Command | Result |
+    |---|---|
+    | `rm -rf /` | Blocked |
+    | `git status` | Allowed |
+    | `npm install` | Allowed |
+  </Accordion>
+  <Accordion title="Blocklist overrides allowlist">
+    Allow `git` commands but block `git push`:
+
+    ```json
+    {
+      "tools": {
+        "core": ["run_shell_command(git)"],
+        "exclude": ["run_shell_command(git push)"]
+      }
+    }
+    ```
+
+    | Command | Result |
+    |---|---|
+    | `git push origin main` | Blocked |
+    | `git status` | Allowed |
+  </Accordion>
+  <Accordion title="Block all shell commands">
+    Completely disable `run_shell_command`:
+
+    ```json
+    {
+      "tools": {
+        "exclude": ["run_shell_command"]
+      }
+    }
+    ```
+  </Accordion>
+</AccordionGroup>
+
+<Warning>
+Command restriction is based on simple string prefix matching and is **not a security sandbox**. A determined user or untrusted prompt could construct commands that bypass prefix checks. For actual isolation, run OpenGame inside a Docker container or use the sandboxing feature. Use `tools.core` to explicitly allowlist the minimum set of commands needed rather than relying on `tools.exclude` alone.
+</Warning>
+
+---
+
+## Interactive shell mode
+
+By default `run_shell_command` runs commands as non-interactive subprocesses. Setting `tools.shell.enableInteractiveShell` to `true` enables a pseudo-terminal (pty) via `node-pty`, which allows the agent to run commands that require real-time user input such as `vim`, `nano`, `htop`, or `git rebase -i`.
+
+When an interactive command is running, press `ctrl+f` in the CLI to focus the terminal and send input directly to the process. Complex TUI applications are rendered correctly.
+
+```json
+{
+  "tools": {
+    "shell": {
+      "enableInteractiveShell": true
+    }
+  }
+}
+```
+
+If `node-pty` is not available at runtime, OpenGame automatically falls back to the standard `child_process` implementation (which does not support interactive commands).
+
+### Additional interactive shell settings
+
+<AccordionGroup>
+  <Accordion title="Show ANSI colour in output">
+    Only applies when `enableInteractiveShell` is `true`:
+
+    ```json
+    {
+      "tools": {
+        "shell": {
+          "enableInteractiveShell": true,
+          "showColor": true
+        }
+      }
+    }
+    ```
+  </Accordion>
+  <Accordion title="Set a custom pager">
+    Defaults to `cat`. Only applies when `enableInteractiveShell` is `true`:
+
+    ```json
+    {
+      "tools": {
+        "shell": {
+          "enableInteractiveShell": true,
+          "pager": "less"
+        }
+      }
+    }
+    ```
+  </Accordion>
+</AccordionGroup>
+
+---
+
+## How the shell tool is used during game generation
+
+OpenGame relies on `run_shell_command` at several key points in the game generation workflow:
+
+| Phase | Typical commands |
+|---|---|
+| **Scaffolding** | `npm create vite@latest`, `npx degit template` |
+| **Dependency installation** | `npm install`, `npm install phaser three.js` |
+| **Development server** | `npm run dev` (background), `python -m http.server` (background) |
+| **Asset pipeline** | `npx tiled --export-map`, custom build scripts |
+| **Verification** | `npm run build`, `npm test`, `npx tsc --noEmit` |
+
+Each of these commands goes through the approval gate so you stay in control of what runs on your machine.

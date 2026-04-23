@@ -1,0 +1,310 @@
+---
+title: 'MCP Integration: Connect OpenGame to External Tools and APIs'
+description: 'Add MCP servers to OpenGame via stdio, SSE, or HTTP to query databases, call APIs, and automate workflows using opengame mcp commands or settings.json.'
+---
+
+The Model Context Protocol (MCP) is an open standard that lets OpenGame connect to external tools, databases, and APIs through a consistent interface. Once an MCP server is connected, the model can invoke its tools just like built-in tools — reading files from a remote repo, querying a database schema, calling an internal API, or running a repeatable workflow exposed as an MCP prompt.
+
+## What you can do with MCP
+
+- **Work with files and repos** — read, search, and write depending on the tools exposed by the server
+- **Query databases** — schema inspection, SQL queries, and reporting
+- **Integrate internal services** — wrap your team's APIs as callable MCP tools
+- **Automate workflows** — expose repeatable multi-step tasks as tools or prompts
+
+---
+
+## Quick start
+
+<Steps>
+  <Step title="Add a server">
+    ```bash
+    opengame mcp add --transport http my-server http://localhost:3000/mcp
+    ```
+  </Step>
+  <Step title="Verify it's listed">
+    ```bash
+    opengame mcp list
+    ```
+  </Step>
+  <Step title="Restart OpenGame">
+    Restart (or start) OpenGame in the same project directory. The model will now have access to the tools exposed by the server.
+  </Step>
+</Steps>
+
+---
+
+## Configuration scopes
+
+MCP server configuration is stored in `settings.json`. Choose the scope that matches your use case:
+
+| Scope | File | Applies to |
+| --- | --- | --- |
+| Project *(default)* | `.qwen/settings.json` | Current project only |
+| User | `~/.qwen/settings.json` | All projects on this machine |
+
+Write to the user scope:
+
+```bash
+opengame mcp add --scope user --transport http my-server http://localhost:3000/mcp
+```
+
+---
+
+## Transport types
+
+MCP servers communicate over three transport types. Choose based on where the server runs and how it's served.
+
+| Transport | When to use | Required JSON field(s) |
+| --- | --- | --- |
+| `http` | Remote services, cloud MCP servers (recommended) | `httpUrl` + optional `headers` |
+| `sse` | Legacy / deprecated servers using Server-Sent Events | `url` + optional `headers` |
+| `stdio` | Local processes (scripts, CLIs, Docker) on your machine | `command`, `args` + optional `cwd`, `env` |
+
+<Note>
+If a server supports both HTTP and SSE, prefer **HTTP** — it is the recommended transport for remote servers.
+</Note>
+
+### Stdio (local process)
+
+<Tabs>
+  <Tab title="settings.json">
+    ```json
+    {
+      "mcpServers": {
+        "pythonTools": {
+          "command": "python",
+          "args": ["-m", "my_mcp_server", "--port", "8080"],
+          "cwd": "./mcp-servers/python",
+          "env": {
+            "DATABASE_URL": "$DB_CONNECTION_STRING",
+            "API_KEY": "${EXTERNAL_API_KEY}"
+          },
+          "timeout": 15000
+        }
+      }
+    }
+    ```
+  </Tab>
+  <Tab title="CLI">
+    ```bash
+    opengame mcp add pythonTools \
+      -e DATABASE_URL=$DB_CONNECTION_STRING \
+      -e API_KEY=$EXTERNAL_API_KEY \
+      --timeout 15000 \
+      python -m my_mcp_server --port 8080
+    ```
+  </Tab>
+</Tabs>
+
+### HTTP (remote streamable HTTP)
+
+<Tabs>
+  <Tab title="settings.json">
+    ```json
+    {
+      "mcpServers": {
+        "httpServerWithAuth": {
+          "httpUrl": "http://localhost:3000/mcp",
+          "headers": {
+            "Authorization": "Bearer your-api-token"
+          },
+          "timeout": 5000
+        }
+      }
+    }
+    ```
+  </Tab>
+  <Tab title="CLI">
+    ```bash
+    opengame mcp add --transport http httpServerWithAuth http://localhost:3000/mcp \
+      --header "Authorization: Bearer your-api-token" \
+      --timeout 5000
+    ```
+  </Tab>
+</Tabs>
+
+### SSE (Server-Sent Events)
+
+<Tabs>
+  <Tab title="settings.json">
+    ```json
+    {
+      "mcpServers": {
+        "sseServer": {
+          "url": "http://localhost:8080/sse",
+          "timeout": 30000
+        }
+      }
+    }
+    ```
+  </Tab>
+  <Tab title="CLI">
+    ```bash
+    opengame mcp add --transport sse sseServer http://localhost:8080/sse --timeout 30000
+    ```
+  </Tab>
+</Tabs>
+
+---
+
+## Safety and control
+
+### Server trust
+
+By default, tool calls from an MCP server trigger the same approval prompts as built-in tool calls. Set `trust: true` to bypass confirmations for a specific server:
+
+```json
+{
+  "mcpServers": {
+    "my-trusted-server": {
+      "httpUrl": "http://localhost:3000/mcp",
+      "trust": true
+    }
+  }
+}
+```
+
+<Warning>
+Use server trust sparingly. A trusted server can execute tool calls without any user confirmation.
+</Warning>
+
+### Tool filtering (per server)
+
+Use `includeTools` and `excludeTools` to control which tools from a server are exposed to the model:
+
+```json
+{
+  "mcpServers": {
+    "filteredServer": {
+      "command": "python",
+      "args": ["-m", "my_mcp_server"],
+      "includeTools": ["safe_tool", "file_reader", "data_processor"],
+      "timeout": 30000
+    }
+  }
+}
+```
+
+`excludeTools` takes precedence: if a tool appears in both lists, it is excluded.
+
+### Global allow/deny lists
+
+Control which MCP servers are active globally across all server entries:
+
+```json
+{
+  "mcp": {
+    "allowed": ["my-trusted-server"],
+    "excluded": ["experimental-server"]
+  }
+}
+```
+
+| Field | Behavior |
+| --- | --- |
+| `mcp.allowed` | Only servers in this list are active |
+| `mcp.excluded` | Servers in this list are disabled |
+
+---
+
+## `opengame mcp` CLI reference
+
+### `opengame mcp add`
+
+```bash
+opengame mcp add [options] <name> <commandOrUrl> [args...]
+```
+
+| Argument / Option | Description | Default | Example |
+| --- | --- | --- | --- |
+| `<name>` | Unique name for the server | — | `my-server` |
+| `<commandOrUrl>` | Command (stdio) or URL (http/sse) | — | `python` or `http://localhost:8080` |
+| `[args...]` | Arguments for a stdio command | — | `-m my_server --port 5000` |
+| `-s`, `--scope` | `user` or `project` | `project` | `-s user` |
+| `-t`, `--transport` | `stdio`, `sse`, or `http` | `stdio` | `-t http` |
+| `-e`, `--env` | Set environment variables | — | `-e KEY=value` |
+| `-H`, `--header` | Set HTTP headers (SSE/HTTP) | — | `-H "X-Api-Key: abc"` |
+| `--timeout` | Connection timeout in milliseconds | — | `--timeout 30000` |
+| `--trust` | Bypass all confirmation prompts for this server | `false` | `--trust` |
+| `--description` | Server description | — | `--description "Local tools"` |
+| `--include-tools` | Comma-separated list of tools to include | all | `--include-tools mytool,other` |
+| `--exclude-tools` | Comma-separated list of tools to exclude | none | `--exclude-tools mytool` |
+
+### `opengame mcp list`
+
+```bash
+opengame mcp list
+```
+
+Lists all configured MCP servers and their connection status.
+
+### `opengame mcp remove`
+
+```bash
+opengame mcp remove <name>
+```
+
+Removes the named server from `settings.json`.
+
+---
+
+## `settings.json` reference
+
+### `mcpServers` properties
+
+**Required** (one of the following per server):
+
+| Property | Description |
+| --- | --- |
+| `command` | Executable path for stdio transport |
+| `url` | SSE endpoint URL |
+| `httpUrl` | HTTP streaming endpoint URL |
+
+**Optional:**
+
+| Property | Type / Default | Description |
+| --- | --- | --- |
+| `args` | array | Command-line arguments (stdio only) |
+| `headers` | object | Custom HTTP headers (SSE or HTTP) |
+| `env` | object | Environment variables; supports `$VAR` and `${VAR}` syntax |
+| `cwd` | string | Working directory (stdio only) |
+| `timeout` | number / `600000` | Request timeout in milliseconds |
+| `trust` | boolean / `false` | Skip tool call confirmations for this server |
+| `includeTools` | array | Allowlist of tool names from this server |
+| `excludeTools` | array | Denylist of tool names (`excludeTools` wins over `includeTools`) |
+
+---
+
+## Troubleshooting
+
+<AccordionGroup>
+  <Accordion title='Server shows "Disconnected" in opengame mcp list'>
+    Verify the URL or command path is correct, then increase the `timeout` value. For HTTP/SSE servers, confirm the server is running and reachable from your machine.
+  </Accordion>
+  <Accordion title="Stdio server fails to start">
+    Use an absolute path for `command` instead of a relative one. Double-check that `cwd` exists and that any required environment variables in `env` are defined in the shell where OpenGame runs.
+  </Accordion>
+  <Accordion title="Environment variables in JSON don't resolve">
+    Variables like `$MY_TOKEN` in `settings.json` are resolved from the environment where OpenGame runs. This can differ between a terminal session and a GUI app. Verify the variable is exported before starting OpenGame.
+  </Accordion>
+</AccordionGroup>
+
+---
+
+## Related pages
+
+<CardGroup cols={2}>
+  <Card title="CLI commands" icon="terminal" href="/features/commands">
+    Use /mcp and /tools inside a session to inspect connected servers and tools.
+  </Card>
+  <Card title="Subagents" icon="users" href="/features/sub-agents">
+    Configure Subagents with access to specific MCP tools for focused delegation.
+  </Card>
+  <Card title="Approval modes" icon="shield-check" href="/features/approval-mode">
+    Control whether MCP tool calls require confirmation or are auto-approved.
+  </Card>
+  <Card title="Configuration & settings" icon="gear" href="/configuration/settings">
+    Full reference for settings.json structure and precedence rules.
+  </Card>
+</CardGroup>

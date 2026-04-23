@@ -1,0 +1,172 @@
+---
+title: "Getting started with OpenGame extensions development"
+description: "Understand how the OpenGame extension system works, what extensions can do, and scaffold your first extension from a built-in template in minutes."
+---
+
+Extensions are the primary way to package and share capabilities with other OpenGame users. An extension can bundle custom slash commands, MCP servers, system context, and tool exclusions into a single installable directory. Once installed, OpenGame loads extensions automatically on startup — no configuration file editing required. This guide walks you through what extensions are, how they integrate with the CLI, and how to get your development environment ready.
+
+## What extensions can do
+
+Each extension is a directory that contains a `qwen-extension.json` manifest. Through that manifest an extension can:
+
+- **Register MCP servers** — expose custom tools to the AI agent without touching `settings.json`
+- **Add custom commands** — provide slash commands like `/security:analyze` that appear in the CLI help
+- **Inject context** — automatically load a `QWEN.md` (or any named file) as conversation context when the extension is active
+- **Restrict tools** — declare `excludeTools` to prevent specific tools from being used in sessions where the extension is loaded
+
+Extensions are scoped and composable. Multiple extensions can be active at the same time, and OpenGame merges their configurations on startup with a well-defined conflict resolution order.
+
+## Prerequisites
+
+Before you build an extension, make sure you have:
+
+- OpenGame >= 0.4.0 installed and in your `PATH`
+- Node.js >= 20.0.0 (required if your extension includes a JavaScript MCP server)
+- A text editor and a terminal
+
+Verify your installation:
+
+```bash
+opengame --version
+```
+
+## How extensions are loaded
+
+On startup, OpenGame scans `~/.qwen/extensions/` for subdirectories that contain a `qwen-extension.json` file. Each valid subdirectory is treated as an installed extension. The directory name must match the `name` field in the manifest.
+
+```
+~/.qwen/extensions/
+└── my-extension/
+    ├── qwen-extension.json
+    ├── QWEN.md              # optional context file
+    └── commands/
+        └── deploy.toml      # optional custom commands
+```
+
+<Note>
+Changes to installed extensions are only reflected in active CLI sessions after a restart. Use `opengame extensions link` during development to avoid reinstalling on every change.
+</Note>
+
+## Scaffold your first extension
+
+OpenGame ships several example extension templates you can copy to get started quickly.
+
+<Steps>
+  <Step title="Choose a template">
+    The following templates are available:
+
+    | Template | Description |
+    |----------|-------------|
+    | `context` | Adds a `QWEN.md` context file to every session |
+    | `custom-commands` | Provides one or more slash commands |
+    | `exclude-tools` | Restricts which tools the agent can use |
+    | `mcp-server` | Registers a custom MCP server |
+
+    Pick the one closest to what you want to build. You can always combine features later.
+  </Step>
+
+  <Step title="Generate the boilerplate">
+    Run the following command, replacing `./my-extension` with your desired path and `custom-commands` with your chosen template:
+
+    ```bash
+    opengame extensions new ./my-extension custom-commands
+    ```
+
+    This copies the template into `./my-extension` and pre-fills the manifest with sensible defaults.
+  </Step>
+
+  <Step title="Link the extension for development">
+    Instead of reinstalling the extension after every edit, link it directly from your development directory:
+
+    ```bash
+    opengame extensions link ./my-extension
+    ```
+
+    This creates a symbolic link from `~/.qwen/extensions/my-extension` to your local directory. Any changes you save are picked up the next time you start the CLI.
+  </Step>
+
+  <Step title="Test in the CLI">
+    Start OpenGame in a new terminal session and verify that your extension loaded:
+
+    ```
+    /extensions list
+    ```
+
+    Your extension's name should appear in the list. If you added a custom command, type `/` and press Tab to see it in the autocomplete menu.
+  </Step>
+</Steps>
+
+## Managing installed extensions
+
+The `opengame extensions` subcommand provides a full suite of management tools. Note that these commands are not available from within an active CLI session — run them in a regular terminal.
+
+<AccordionGroup>
+  <Accordion title="Installing an extension">
+    Install from a GitHub URL or a local path:
+
+    ```bash
+    # From a GitHub repository
+    opengame extensions install https://github.com/qwen-cli-extensions/security
+
+    # Shorthand for GitHub repos
+    opengame extensions install qwen-cli-extensions/security
+
+    # From a local directory
+    opengame extensions install ./path/to/my-extension
+    ```
+
+    OpenGame copies the extension into `~/.qwen/extensions/`. Use `opengame extensions update` to pull in future changes.
+  </Accordion>
+
+  <Accordion title="Updating an extension">
+    Pull the latest version of a specific extension:
+
+    ```bash
+    opengame extensions update my-extension
+    ```
+
+    Update all installed extensions at once:
+
+    ```bash
+    opengame extensions update --all
+    ```
+  </Accordion>
+
+  <Accordion title="Disabling and enabling an extension">
+    Disable an extension globally (across all workspaces):
+
+    ```bash
+    opengame extensions disable my-extension
+    ```
+
+    Disable only for the current workspace:
+
+    ```bash
+    opengame extensions disable my-extension --scope=workspace
+    ```
+
+    Re-enable it globally or for a specific workspace:
+
+    ```bash
+    opengame extensions enable my-extension
+    opengame extensions enable my-extension --scope=workspace
+    ```
+  </Accordion>
+
+  <Accordion title="Uninstalling an extension">
+    ```bash
+    opengame extensions uninstall my-extension
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Building extensions" icon="hammer" href="/developers/extensions/extension">
+    Learn the full extension format: the manifest schema, custom commands, variables, and conflict resolution.
+  </Card>
+  <Card title="Releasing extensions" icon="rocket" href="/developers/extensions/releasing">
+    Publish your extension via a git repository or GitHub Releases so others can install it with a single command.
+  </Card>
+</CardGroup>

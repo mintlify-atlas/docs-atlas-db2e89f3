@@ -1,0 +1,279 @@
+---
+title: 'Approval Modes: Plan, Default, Auto-Edit, and YOLO'
+description: 'Control how much autonomy OpenGame has over file edits and shell commands. Choose from four modes to match your risk tolerance and workflow speed.'
+---
+
+OpenGame's approval system puts you in control of every consequential action the model takes. Rather than a binary "allow everything or nothing" switch, four distinct modes let you tune the balance between speed and safety for each task. Press **Shift+Tab** at any time during a session to cycle through modes, or configure a default in `settings.json`.
+
+## Mode comparison
+
+| Mode | File editing | Shell commands | Risk level | Best for |
+| --- | --- | --- | --- | --- |
+| **Plan** | Read-only analysis only | Not executed | Lowest | Code exploration, planning complex changes |
+| **Default** | Manual approval required | Manual approval required | Low | New codebases, critical systems, learning |
+| **Auto-Edit** | Auto-approved | Manual approval required | Medium | Daily development, safe refactoring |
+| **YOLO** | Auto-approved | Auto-approved | Highest | CI/CD pipelines, trusted personal projects |
+
+<Tip>
+Press **Shift+Tab** to cycle through modes without leaving your current session. The terminal status bar always shows the active mode.
+</Tip>
+
+The cycle order is:
+
+```
+Default → Auto-Edit → YOLO → Plan → Default
+```
+
+---
+
+## Plan mode
+
+Plan mode instructs OpenGame to analyze your codebase using **read-only** operations and produce a detailed plan — without making any changes. It is the safest starting point for complex or unfamiliar tasks.
+
+### When to use plan mode
+
+- **Multi-step implementations** — understand the full scope before touching files
+- **Codebase exploration** — research architecture and dependencies safely
+- **Interactive direction-setting** — iterate on the plan with follow-up questions before committing to execution
+
+### Enabling plan mode
+
+<Tabs>
+  <Tab title="Slash command">
+    Switch to plan mode inside an active session:
+
+    ```text
+    /approval-mode plan
+    ```
+  </Tab>
+  <Tab title="Keyboard shortcut">
+    Press **Shift+Tab** twice from Default mode (first press switches to Auto-Edit, second to YOLO, third to Plan).
+  </Tab>
+  <Tab title="settings.json">
+    Set plan mode as the project or user default:
+
+    ```json
+    {
+      "permissions": {
+        "defaultMode": "plan"
+      }
+    }
+    ```
+  </Tab>
+</Tabs>
+
+### Example: planning a complex refactor
+
+```text
+/approval-mode plan
+
+I need to refactor our authentication system to use OAuth2.
+Create a detailed migration plan.
+```
+
+OpenGame reads the current implementation and produces a comprehensive plan. You can refine it with follow-ups before switching to a higher-privilege mode to execute:
+
+```text
+What about backward compatibility?
+How should we handle the database migration?
+```
+
+---
+
+## Default mode
+
+Default mode is the standard operating mode for OpenGame. The model proposes every file write and shell command, and you approve or reject each one before it runs.
+
+### When to use default mode
+
+- Working on **new or unfamiliar codebases**
+- Making changes to **production or critical systems**
+- **Teaching or pair-programming** sessions where you want to understand each step
+- **Team environments** where unreviewed changes could affect others
+
+### Enabling default mode
+
+<Tabs>
+  <Tab title="Slash command">
+    ```text
+    /approval-mode default
+    ```
+  </Tab>
+  <Tab title="Keyboard shortcut">
+    Continue pressing **Shift+Tab** until no mode indicator appears in the status bar.
+  </Tab>
+  <Tab title="settings.json">
+    ```json
+    {
+      "permissions": {
+        "defaultMode": "default"
+      }
+    }
+    ```
+  </Tab>
+</Tabs>
+
+Default mode is active when you start OpenGame without any explicit mode configuration.
+
+---
+
+## Auto-Edit mode
+
+Auto-Edit mode automatically approves file edits while still requiring manual approval for shell commands. This eliminates approval friction for safe code changes while keeping you in control of anything that runs on your machine.
+
+### When to use auto-edit mode
+
+- **Daily development** — most coding tasks involve file writes but not dangerous commands
+- **Refactoring sessions** — the model can apply dozens of edits without interruption
+- **Headless runs** — this is the default mode when running `opengame -p "..."` without explicit flags (see [Headless mode](/features/headless))
+
+### Enabling auto-edit mode
+
+<Tabs>
+  <Tab title="Slash command">
+    ```text
+    /approval-mode auto-edit
+    ```
+  </Tab>
+  <Tab title="Keyboard shortcut">
+    Press **Shift+Tab** once from Default mode. The status bar shows `⏵⏵ accept edits on`.
+  </Tab>
+  <Tab title="settings.json">
+    ```json
+    {
+      "permissions": {
+        "defaultMode": "auto-edit"
+      }
+    }
+    ```
+  </Tab>
+</Tabs>
+
+### Workflow example
+
+<Steps>
+  <Step title="Ask for a refactor">
+    You request a function refactor. The model analyzes the code and proposes changes.
+  </Step>
+  <Step title="Edits applied automatically">
+    All file edits are applied without confirmation prompts.
+  </Step>
+  <Step title="Shell commands still prompt">
+    If the model needs to run `npm test`, it pauses and waits for your approval before executing.
+  </Step>
+</Steps>
+
+---
+
+## YOLO mode
+
+YOLO mode auto-approves every tool call — file edits and shell commands alike. The model executes without any confirmation dialogs.
+
+<Warning>
+YOLO mode executes shell commands with your full terminal permissions. Before enabling it, ensure you trust the codebase, understand what the model will do, and that important files are committed to version control or backed up.
+</Warning>
+
+### When to use YOLO mode
+
+- **CI/CD pipelines** — fully automated, controlled environments
+- **Trusted personal projects** — rapid iteration where you know the codebase
+- **Batch processing** — multi-step tasks that require long command chains
+
+### Enabling YOLO mode
+
+<Tabs>
+  <Tab title="Slash command">
+    ```text
+    # Current session only
+    /approval-mode yolo
+
+    # Set as project default
+    /approval-mode yolo --project
+
+    # Set as global user default
+    /approval-mode yolo --user
+    ```
+  </Tab>
+  <Tab title="CLI flag">
+    ```bash
+    opengame --prompt "Run the test suite, fix all failing tests, then commit" --yolo
+    # Equivalent
+    opengame --prompt "..." --approval-mode yolo
+    ```
+  </Tab>
+  <Tab title="settings.json">
+    ```json
+    {
+      "permissions": {
+        "defaultMode": "yolo",
+        "confirmShellCommands": false,
+        "confirmFileEdits": false
+      }
+    }
+    ```
+  </Tab>
+</Tabs>
+
+### Automated workflow example
+
+```bash
+# Fully automated refactoring — no human intervention required
+opengame --prompt "Run the test suite, fix all failing tests, then commit changes" --yolo
+
+# Without any prompts, the model will:
+# 1. Run test commands (auto-approved)
+# 2. Edit failing test files (auto-approved)
+# 3. Execute git commit (auto-approved)
+```
+
+---
+
+## Persistent configuration
+
+Store your preferred mode in `settings.json` so it applies automatically to every session:
+
+```json
+// Project-level: ./.qwen/settings.json
+// User-level:    ~/.qwen/settings.json
+{
+  "permissions": {
+    "defaultMode": "auto-edit",
+    "confirmShellCommands": true,
+    "confirmFileEdits": true
+  }
+}
+```
+
+## Usage recommendations
+
+<AccordionGroup>
+  <Accordion title="I'm exploring an unfamiliar codebase">
+    Start with **Plan mode** to map the architecture. Once you understand the structure, switch to **Default mode** to make controlled changes.
+  </Accordion>
+  <Accordion title="I'm doing routine daily development">
+    **Auto-Edit mode** gives you the best balance — file edits flow without interruption, shell commands still require a confirmation tap.
+  </Accordion>
+  <Accordion title="I'm running automated scripts or CI">
+    **YOLO mode** is appropriate here. Lock it to a specific project by using `/approval-mode yolo --project` or setting `defaultMode` in `.qwen/settings.json`.
+  </Accordion>
+  <Accordion title="I want to review a PR safely">
+    Use **Plan mode** or **Default mode**. In Plan mode the model cannot modify anything; in Default mode every proposed change surfaces for your review before it lands.
+  </Accordion>
+</AccordionGroup>
+
+## Related pages
+
+<CardGroup cols={2}>
+  <Card title="Headless mode" icon="terminal" href="/features/headless">
+    Learn how approval modes apply to scriptable, non-interactive runs.
+  </Card>
+  <Card title="Sandboxing" icon="box" href="/features/sandbox">
+    Add a second layer of protection by running shell commands inside a sandbox.
+  </Card>
+  <Card title="CLI commands" icon="list" href="/features/commands">
+    Full reference for /approval-mode and other slash commands.
+  </Card>
+  <Card title="Configuration & settings" icon="gear" href="/configuration/settings">
+    Set defaultMode and other permission options in settings.json.
+  </Card>
+</CardGroup>

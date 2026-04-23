@@ -1,0 +1,513 @@
+---
+title: "TypeScript SDK: @opengame/sdk complete API reference"
+description: "Install @opengame/sdk, run single-turn and multi-turn queries, manage tool permissions, connect MCP servers, and stream messages in Node.js."
+---
+
+The `@opengame/sdk` package gives you full programmatic access to OpenGame from any Node.js application. You create a `query()` session, stream messages back as an async iterable, and control every aspect of the session — tool permissions, model selection, MCP servers, and multi-turn conversations — without touching the CLI directly. The SDK is experimental but actively maintained; feature requests, issues, and pull requests are welcome.
+
+## Installation
+
+```bash
+npm install @opengame/sdk
+```
+
+### Requirements
+
+- **Node.js** >= 20.0.0
+- **OpenGame** >= 0.4.0 installed and accessible in `PATH` (required only for SDK v0.1.0; from v0.1.1 the CLI is bundled automatically)
+
+<Note>
+If you use `nvm` to manage Node.js versions, the SDK may not be able to auto-detect the OpenGame executable. Set `pathToQwenExecutable` explicitly to the full path of the `opengame` binary to avoid detection failures.
+</Note>
+
+## Quick start
+
+The `query()` function returns an async iterable. You iterate over it to receive a stream of typed messages from the agent.
+
+```typescript
+import { query } from '@opengame/sdk';
+
+const result = query({
+  prompt: 'What files are in the current directory?',
+  options: {
+    cwd: '/path/to/project',
+  },
+});
+
+for await (const message of result) {
+  if (message.type === 'assistant') {
+    console.log('Assistant:', message.message.content);
+  } else if (message.type === 'result') {
+    console.log('Result:', message.result);
+  }
+}
+```
+
+## API reference
+
+### `query(config)`
+
+Creates a new query session with the OpenGame agent. Returns a `Query` instance that is also an async iterable of `SDKMessage` objects.
+
+**Parameters**
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `prompt` | `string \| AsyncIterable<SDKUserMessage>` | The prompt to send. Use a string for single-turn queries or an async iterable for multi-turn conversations. |
+| `options` | `QueryOptions` | Configuration options for the query session (see below). |
+
+### `QueryOptions`
+
+All options are optional unless noted.
+
+<AccordionGroup>
+  <Accordion title="Session context">
+    <ParamField body="cwd" type="string" default="process.cwd()">
+      The working directory for the query session. Determines the context in which file operations and commands are executed.
+    </ParamField>
+
+    <ParamField body="model" type="string">
+      The AI model to use, for example `'qwen-max'`, `'qwen-plus'`, or `'qwen-turbo'`. Takes precedence over `OPENAI_MODEL` and `QWEN_MODEL` environment variables.
+    </ParamField>
+
+    <ParamField body="pathToQwenExecutable" type="string" default="Auto-detected">
+      Path to the OpenGame executable. Supports multiple formats:
+
+      - `'opengame'` — native binary from PATH
+      - `'/path/to/opengame'` — explicit absolute path
+      - `'/path/to/cli.js'` — Node.js bundle (default for `.js` files)
+      - `'node:/path/to/cli.js'` — force Node.js runtime
+      - `'bun:/path/to/cli.js'` — force Bun runtime
+      - `'tsx:/path/to/index.ts'` — force tsx runtime
+
+      When not provided, the SDK uses the CLI bundled inside the package. The `QWEN_CODE_CLI_PATH` environment variable is still recognised as an override for backward compatibility.
+    </ParamField>
+
+    <ParamField body="env" type="Record<string, string>">
+      Environment variables to pass to the OpenGame process. Merged with the current process environment.
+    </ParamField>
+
+    <ParamField body="maxSessionTurns" type="number" default="-1 (unlimited)">
+      Maximum number of conversation turns before the session automatically terminates. A turn consists of a user message and an assistant response.
+    </ParamField>
+
+    <ParamField body="debug" type="boolean" default="false">
+      Enable verbose logging from the CLI process. Use alongside `logLevel` to control verbosity.
+    </ParamField>
+
+    <ParamField body="includePartialMessages" type="boolean" default="false">
+      When `true`, the SDK emits incomplete messages as they are being generated, enabling real-time streaming of the AI's response.
+    </ParamField>
+
+    <ParamField body="authType" type="'openai' | 'qwen-oauth'" default="'openai'">
+      Authentication type for the AI service. Using `'qwen-oauth'` is not recommended in the SDK because credentials are stored in `~/.qwen` and may need periodic refresh.
+    </ParamField>
+
+    <ParamField body="agents" type="SubagentConfig[]">
+      Configuration for subagents that can be invoked during the session. Subagents are specialised AI agents for specific tasks or domains.
+    </ParamField>
+  </Accordion>
+
+  <Accordion title="Tool permissions">
+    <ParamField body="permissionMode" type="'default' | 'plan' | 'auto-edit' | 'yolo'" default="'default'">
+      Permission mode controlling tool execution approval. See [Permission modes](#permission-modes) for the full description of each value.
+    </ParamField>
+
+    <ParamField body="canUseTool" type="CanUseTool">
+      Custom permission handler for tool execution approval. Invoked when a tool requires confirmation. Must resolve within 60 seconds or the request is auto-denied. See [Custom permission handler](#custom-permission-handler).
+    </ParamField>
+
+    <ParamField body="coreTools" type="string[]">
+      Equivalent to `tool.core` in `settings.json`. When specified, only these tools are available to the AI.
+
+      ```typescript
+      coreTools: ['read_file', 'write_file', 'run_terminal_cmd']
+      ```
+    </ParamField>
+
+    <ParamField body="excludeTools" type="string[]">
+      Equivalent to `tool.exclude` in `settings.json`. Excluded tools return a permission error immediately and take the highest priority over all other permission settings. Supports pattern matching:
+
+      - Tool name: `'write_file'`
+      - Tool class: `'ShellTool'`
+      - Shell command prefix: `'ShellTool(rm )'`
+    </ParamField>
+
+    <ParamField body="allowedTools" type="string[]">
+      Equivalent to `tool.allowed` in `settings.json`. Matching tools bypass the `canUseTool` callback and execute automatically. Only applies when a tool requires confirmation. Supports the same pattern matching as `excludeTools`.
+    </ParamField>
+  </Accordion>
+
+  <Accordion title="MCP servers">
+    <ParamField body="mcpServers" type="Record<string, McpServerConfig>">
+      MCP (Model Context Protocol) servers to connect. Supports external servers (stdio/SSE/HTTP) and SDK-embedded servers.
+
+      ```typescript
+      // External server via stdio
+      mcpServers: {
+        'my-server': { command: 'node', args: ['server.js'], env: { PORT: '3000' } }
+      }
+
+      // External server via SSE
+      mcpServers: {
+        'remote': { url: 'http://localhost:3000/sse' }
+      }
+
+      // External server via Streamable HTTP
+      mcpServers: {
+        'http-server': { httpUrl: 'http://localhost:3000/mcp', headers: { Authorization: 'Bearer token' } }
+      }
+      ```
+
+      SDK-embedded servers use `{ type: 'sdk', name: string, instance: Server }` — see [SDK-embedded MCP servers](#sdk-embedded-mcp-servers).
+    </ParamField>
+  </Accordion>
+
+  <Accordion title="Cancellation & timeouts">
+    <ParamField body="abortController" type="AbortController">
+      Controller to cancel the query session. Call `abortController.abort()` to terminate the session and clean up resources. See [Abort a query](#abort-a-query).
+    </ParamField>
+
+    <ParamField body="timeout" type="object">
+      Timeout configuration for various SDK operations. All values are in milliseconds.
+
+      <Expandable title="Timeout fields">
+        <ResponseField name="canUseTool" type="number" default="60000">
+          Maximum time for the `canUseTool` callback to respond. If exceeded, the tool request is auto-denied.
+        </ResponseField>
+        <ResponseField name="mcpRequest" type="number" default="60000">
+          Maximum time for SDK MCP tool calls to complete.
+        </ResponseField>
+        <ResponseField name="controlRequest" type="number" default="60000">
+          Maximum time for control operations like `initialize()`, `setModel()`, `setPermissionMode()`, and `interrupt()`.
+        </ResponseField>
+        <ResponseField name="streamClose" type="number" default="60000">
+          Maximum time to wait for initialisation to complete before closing CLI stdin in multi-turn mode with SDK MCP servers.
+        </ResponseField>
+      </Expandable>
+    </ParamField>
+  </Accordion>
+</AccordionGroup>
+
+### Timeout defaults
+
+| Timeout | Default | Description |
+|---------|---------|-------------|
+| `canUseTool` | 1 minute | Maximum time for `canUseTool` callback to respond. If exceeded, the tool request is auto-denied. |
+| `mcpRequest` | 1 minute | Maximum time for SDK MCP tool calls to complete. |
+| `controlRequest` | 1 minute | Maximum time for control operations like `setModel()`, `setPermissionMode()`, and `interrupt()`. |
+| `streamClose` | 1 minute | Maximum time to wait for initialisation to complete before closing CLI stdin in multi-turn mode with SDK MCP servers. |
+
+You can override any of these:
+
+```typescript
+const result = query({
+  prompt: 'Long running task',
+  options: {
+    timeout: {
+      canUseTool: 60000,    // 60 seconds for permission callback
+      mcpRequest: 600000,   // 10 minutes for MCP tool calls
+      controlRequest: 60000,
+      streamClose: 15000,
+    },
+  },
+});
+```
+
+### Message type guards
+
+The SDK exports type guard functions to narrow the type of messages in the stream:
+
+```typescript
+import {
+  isSDKUserMessage,
+  isSDKAssistantMessage,
+  isSDKSystemMessage,
+  isSDKResultMessage,
+  isSDKPartialAssistantMessage,
+} from '@opengame/sdk';
+
+for await (const message of result) {
+  if (isSDKAssistantMessage(message)) {
+    // message is SDKAssistantMessage
+  } else if (isSDKResultMessage(message)) {
+    // message is SDKResultMessage
+  }
+}
+```
+
+### Query instance methods
+
+`query()` returns a `Query` instance that you can use to inspect and control the active session:
+
+```typescript
+const q = query({ prompt: 'Hello', options: {} });
+
+// Get the session ID
+const sessionId = q.getSessionId();
+
+// Check whether the session has closed
+const closed = q.isClosed();
+
+// Interrupt the current agent operation
+await q.interrupt();
+
+// Change permission mode during the session
+await q.setPermissionMode('yolo');
+
+// Swap the active model during the session
+await q.setModel('qwen-max');
+
+// Close the session and clean up resources
+await q.close();
+```
+
+## Permission modes
+
+The SDK supports four permission modes that control how tool execution is approved:
+
+| Mode | Behaviour |
+|------|-----------|
+| `default` | Write tools are denied unless approved via `canUseTool` or listed in `allowedTools`. Read-only tools execute without confirmation. |
+| `plan` | Blocks all write tools and instructs the AI to present a plan first. Read-only tools execute normally. |
+| `auto-edit` | Auto-approves edit tools (`edit`, `write_file`) while other write tools require confirmation. |
+| `yolo` | All tools execute automatically without confirmation. |
+
+### Permission priority chain
+
+When a tool is invoked, the SDK evaluates permissions in this order:
+
+1. `excludeTools` — blocks the tool completely, returning a permission error
+2. `permissionMode: 'plan'` — blocks all non-read-only tools
+3. `permissionMode: 'yolo'` — auto-approves all tools
+4. `allowedTools` — auto-approves matching tools
+5. `canUseTool` callback — custom approval logic
+6. Default behaviour — auto-deny in SDK mode
+
+## Examples
+
+### Multi-turn conversation
+
+Use an async generator as the `prompt` to drive a multi-turn session:
+
+```typescript
+import { query, type SDKUserMessage } from '@opengame/sdk';
+
+async function* generateMessages(): AsyncIterable<SDKUserMessage> {
+  yield {
+    type: 'user',
+    session_id: 'my-session',
+    message: { role: 'user', content: 'Create a hello.txt file' },
+    parent_tool_use_id: null,
+  };
+
+  yield {
+    type: 'user',
+    session_id: 'my-session',
+    message: { role: 'user', content: 'Now read the file back' },
+    parent_tool_use_id: null,
+  };
+}
+
+const result = query({
+  prompt: generateMessages(),
+  options: {
+    permissionMode: 'auto-edit',
+  },
+});
+
+for await (const message of result) {
+  console.log(message);
+}
+```
+
+### Custom permission handler
+
+Provide a `canUseTool` callback to approve or deny tool calls programmatically:
+
+```typescript
+import { query, type CanUseTool } from '@opengame/sdk';
+
+const canUseTool: CanUseTool = async (toolName, input, { signal }) => {
+  // Allow all read operations automatically
+  if (toolName.startsWith('read_')) {
+    return { behavior: 'allow', updatedInput: input };
+  }
+
+  // Prompt the user for write operations
+  const userApproved = await promptUser(`Allow ${toolName}?`);
+
+  if (userApproved) {
+    return { behavior: 'allow', updatedInput: input };
+  }
+
+  return { behavior: 'deny', message: 'User denied the operation' };
+};
+
+const result = query({
+  prompt: 'Create a new file',
+  options: {
+    canUseTool,
+  },
+});
+```
+
+### With external MCP servers
+
+Connect to an MCP server running in a separate process:
+
+```typescript
+import { query } from '@opengame/sdk';
+
+const result = query({
+  prompt: 'Use the custom tool from my MCP server',
+  options: {
+    mcpServers: {
+      'my-server': {
+        command: 'node',
+        args: ['path/to/mcp-server.js'],
+        env: { PORT: '3000' },
+      },
+    },
+  },
+});
+```
+
+### Abort a query
+
+Use an `AbortController` to cancel a long-running session:
+
+```typescript
+import { query, isAbortError } from '@opengame/sdk';
+
+const abortController = new AbortController();
+
+const result = query({
+  prompt: 'Long running task...',
+  options: { abortController },
+});
+
+// Cancel after 5 seconds
+setTimeout(() => abortController.abort(), 5000);
+
+try {
+  for await (const message of result) {
+    console.log(message);
+  }
+} catch (error) {
+  if (isAbortError(error)) {
+    console.log('Query was aborted');
+  } else {
+    throw error;
+  }
+}
+```
+
+## Error handling
+
+The SDK exports an `AbortError` class and an `isAbortError` type guard for handling cancellation:
+
+```typescript
+import { AbortError, isAbortError } from '@opengame/sdk';
+
+try {
+  for await (const message of result) {
+    // process messages
+  }
+} catch (error) {
+  if (isAbortError(error)) {
+    // Session was aborted — clean up gracefully
+  } else {
+    throw error;
+  }
+}
+```
+
+## SDK-embedded MCP servers
+
+You can run an MCP server inside the same Node.js process as your SDK application using `tool()` and `createSdkMcpServer()`. This avoids spinning up a separate server process and simplifies deployment.
+
+### `tool(name, description, inputSchema, handler)`
+
+Creates a typed tool definition using a Zod schema.
+
+<ParamField body="name" type="string" required>
+  Tool name (1–64 characters, must start with a letter, alphanumeric and underscores only).
+</ParamField>
+
+<ParamField body="description" type="string" required>
+  Human-readable description of what the tool does. The AI uses this to decide when to invoke the tool.
+</ParamField>
+
+<ParamField body="inputSchema" type="ZodRawShape" required>
+  A Zod schema object defining the tool's input parameters.
+</ParamField>
+
+<ParamField body="handler" type="(args, extra) => Promise<CallToolResult>" required>
+  Async function that executes the tool. Must return a `CallToolResult`:
+
+  ```typescript
+  {
+    content: Array<
+      | { type: 'text'; text: string }
+      | { type: 'image'; data: string; mimeType: string }
+      | { type: 'resource'; uri: string; mimeType?: string; text?: string }
+    >;
+    isError?: boolean;
+  }
+  ```
+</ParamField>
+
+### `createSdkMcpServer(options)`
+
+Creates an SDK-embedded MCP server instance that can be passed directly to `mcpServers`.
+
+<ParamField body="name" type="string" required>
+  Unique name for the MCP server.
+</ParamField>
+
+<ParamField body="version" type="string" default="'1.0.0'">
+  Server version string.
+</ParamField>
+
+<ParamField body="tools" type="SdkMcpToolDefinition[]">
+  Array of tools created with `tool()`.
+</ParamField>
+
+### Full example
+
+```typescript
+import { z } from 'zod';
+import { query, tool, createSdkMcpServer } from '@opengame/sdk';
+
+// Define a tool with a Zod schema
+const calculatorTool = tool(
+  'calculate_sum',
+  'Add two numbers together',
+  { a: z.number(), b: z.number() },
+  async (args) => ({
+    content: [{ type: 'text', text: String(args.a + args.b) }],
+  }),
+);
+
+// Create the MCP server
+const server = createSdkMcpServer({
+  name: 'calculator',
+  tools: [calculatorTool],
+});
+
+// Pass the server to a query
+const result = query({
+  prompt: 'What is 42 + 17?',
+  options: {
+    permissionMode: 'yolo',
+    mcpServers: {
+      calculator: server,
+    },
+  },
+});
+
+for await (const message of result) {
+  console.log(message);
+}
+```

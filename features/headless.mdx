@@ -1,0 +1,246 @@
+---
+title: 'Headless Mode: Run OpenGame from Scripts and CI/CD'
+description: 'Run OpenGame programmatically via --prompt, stdin, and structured output formats to integrate AI into CI/CD pipelines, scripts, and automation tools.'
+---
+
+Headless mode lets you drive OpenGame entirely from the command line — no interactive UI required. Pass a prompt with `--prompt` (or `-p`), pipe input through stdin, and receive output as plain text, buffered JSON, or a real-time stream of JSON events. This makes OpenGame a composable building block for code review bots, CI pipelines, commit message generators, and any other automation that benefits from AI reasoning.
+
+## Basic usage
+
+### Inline prompt
+
+Use `-p` or `--prompt` to send a single query and exit:
+
+```bash
+opengame --prompt "What is machine learning?"
+```
+
+### Stdin input
+
+Pipe content directly into OpenGame when no `-p` flag is present:
+
+```bash
+echo "Explain this code" | opengame
+```
+
+### Combining file input with a prompt
+
+```bash
+cat README.md | opengame --prompt "Summarize this documentation"
+```
+
+### Resume a previous session
+
+Headless runs can continue an existing conversation, preserving tool outputs and compression checkpoints:
+
+```bash
+# Continue the most recent session for this project
+opengame --continue -p "Run the tests again and summarize failures"
+
+# Resume a specific session by ID
+opengame --resume 123e4567-e89b-12d3-a456-426614174000 -p "Apply the follow-up refactor"
+```
+
+<Note>
+Session data is stored as project-scoped JSONL under `~/.qwen/projects/<sanitized-cwd>/chats`. Resuming restores full conversation history, tool outputs, and chat-compression checkpoints before sending the new prompt.
+</Note>
+
+## Output formats
+
+OpenGame supports three output formats selectable with `--output-format` (`-o`).
+
+<Tabs>
+  <Tab title="text (default)">
+    Standard human-readable output — ideal for quick queries and terminal use.
+
+    ```bash
+    opengame -p "What is the capital of France?"
+    ```
+
+    ```text
+    The capital of France is Paris.
+    ```
+  </Tab>
+  <Tab title="json">
+    Buffers all messages and emits a single JSON array when execution completes. Best for programmatic post-processing.
+
+    ```bash
+    opengame -p "What is the capital of France?" --output-format json
+    ```
+
+    ```json
+    [
+      {
+        "type": "system",
+        "subtype": "session_start",
+        "uuid": "...",
+        "session_id": "...",
+        "model": "qwen3-coder-plus"
+      },
+      {
+        "type": "assistant",
+        "uuid": "...",
+        "session_id": "...",
+        "message": {
+          "role": "assistant",
+          "content": [{ "type": "text", "text": "The capital of France is Paris." }]
+        },
+        "parent_tool_use_id": null
+      },
+      {
+        "type": "result",
+        "subtype": "success",
+        "is_error": false,
+        "duration_ms": 1234,
+        "result": "The capital of France is Paris."
+      }
+    ]
+    ```
+  </Tab>
+  <Tab title="stream-json">
+    Emits newline-delimited JSON events immediately as they occur. Combine with `--include-partial-messages` for real-time token streaming.
+
+    ```bash
+    opengame -p "Explain TypeScript" --output-format stream-json
+    ```
+
+    ```json
+    {"type":"system","subtype":"session_start","uuid":"...","session_id":"..."}
+    {"type":"assistant","uuid":"...","session_id":"...","message":{...}}
+    {"type":"result","subtype":"success","uuid":"...","session_id":"..."}
+    ```
+
+    With partial messages for real-time UI updates:
+
+    ```bash
+    opengame -p "Write a Python script" --output-format stream-json --include-partial-messages
+    ```
+  </Tab>
+</Tabs>
+
+### Input format
+
+The `--input-format` flag controls how OpenGame reads from stdin:
+
+- **`text`** (default) — plain text from stdin or the `-p` argument
+- **`stream-json`** — JSON message protocol for bidirectional SDK integration (requires `--output-format stream-json`)
+
+## Approval mode in headless runs
+
+Because there is no interactive UI to show confirmation prompts, OpenGame gates tools based on the effective approval mode:
+
+| Effective approval mode | `write_file` / `replace` | `run_shell_command` |
+| ----------------------- | ------------------------ | ------------------- |
+| `default` / `plan`      | excluded                 | excluded            |
+| `auto-edit` *(headless default)* | allowed         | excluded            |
+| `yolo`                  | allowed                  | allowed             |
+
+When you launch a headless run without `--yolo`, `--approval-mode`, or a `tools.approvalMode` setting, OpenGame automatically elevates to `auto-edit` so the model can create and edit files. Shell execution remains blocked unless you opt in explicitly:
+
+```bash
+# Headless default — write/edit allowed, shell blocked
+opengame -p "Build a Snake clone with WASD controls and a dark theme."
+
+# Allow shell commands as well
+opengame -p "Build a Snake clone..." --yolo
+
+# Fully restrictive — no writes, no shell
+opengame -p "Build a Snake clone..." --approval-mode default
+```
+
+<Warning>
+If the current folder is not trusted, the approval mode is forced back to `default` regardless of flags.
+</Warning>
+
+## CLI options reference
+
+| Option | Short | Description | Example |
+| --- | --- | --- | --- |
+| `--prompt` | `-p` | Run in headless mode with this prompt | `opengame -p "query"` |
+| `--output-format` | `-o` | Output format: `text`, `json`, `stream-json` | `--output-format json` |
+| `--input-format` | | Input format: `text`, `stream-json` | `--input-format text` |
+| `--include-partial-messages` | | Emit partial tokens in stream-json mode | `--output-format stream-json --include-partial-messages` |
+| `--debug` | `-d` | Enable debug logging | `opengame -p "query" --debug` |
+| `--all-files` | `-a` | Include all project files in context | `opengame -p "query" --all-files` |
+| `--include-directories` | | Add extra directories to context | `--include-directories src,docs` |
+| `--yolo` | `-y` | Auto-approve all actions | `opengame -p "query" --yolo` |
+| `--approval-mode` | | Set approval mode explicitly | `--approval-mode auto_edit` |
+| `--continue` | | Resume the most recent project session | `opengame --continue -p "..."` |
+| `--resume [sessionId]` | | Resume a specific session | `opengame --resume 123e... -p "..."` |
+| `--experimental-skills` | | Enable the experimental Skills tool | `opengame --experimental-skills -p "..."` |
+
+## Practical examples
+
+### Code review
+
+```bash
+cat src/auth.py | opengame -p "Review this authentication code for security issues" > security-review.txt
+```
+
+### Generate commit messages
+
+```bash
+result=$(git diff --cached | opengame -p "Write a concise commit message for these changes" --output-format json)
+echo "$result" | jq -r '.response'
+```
+
+### API documentation generation
+
+```bash
+result=$(cat api/routes.js | opengame -p "Generate OpenAPI spec for these routes" --output-format json)
+echo "$result" | jq -r '.response' > openapi.json
+```
+
+### Batch file analysis
+
+```bash
+for file in src/*.py; do
+    echo "Analyzing $file..."
+    result=$(cat "$file" | opengame -p "Find potential bugs and suggest improvements" --output-format json)
+    echo "$result" | jq -r '.response' > "reports/$(basename "$file").analysis"
+done
+```
+
+### PR review
+
+```bash
+result=$(git diff origin/main...HEAD | opengame -p "Review these changes for bugs, security issues, and code quality" --output-format json)
+echo "$result" | jq -r '.response' > pr-review.json
+```
+
+### Release notes from git log
+
+```bash
+result=$(git log --oneline v1.0.0..HEAD | opengame -p "Generate release notes from these commits" --output-format json)
+echo "$result" | jq -r '.response' >> CHANGELOG.md
+```
+
+### Token and tool usage tracking
+
+```bash
+result=$(opengame -p "Explain this database schema" --include-directories db --output-format json)
+total_tokens=$(echo "$result" | jq -r '.stats.models // {} | to_entries | map(.value.tokens.total) | add // 0')
+tool_calls=$(echo "$result" | jq -r '.stats.tools.totalCalls // 0')
+echo "$(date): $total_tokens tokens, $tool_calls tool calls" >> usage.log
+```
+
+<Tip>
+Pipe `--output-format stream-json` output through `jq` for real-time filtering: `opengame -p "..." --output-format stream-json | jq '.type'`
+</Tip>
+
+## Related pages
+
+<CardGroup cols={2}>
+  <Card title="Approval modes" icon="shield-check" href="/features/approval-mode">
+    Understand plan, default, auto-edit, and YOLO modes used in headless runs.
+  </Card>
+  <Card title="CLI commands reference" icon="terminal" href="/features/commands">
+    Full reference for slash, @, and ! commands used in interactive sessions.
+  </Card>
+  <Card title="Sandboxing" icon="box" href="/features/sandbox">
+    Isolate headless shell commands using macOS Seatbelt or Docker.
+  </Card>
+  <Card title="Configuration & settings" icon="gear" href="/configuration/settings">
+    Set `tools.approvalMode` and other defaults in `settings.json`.
+  </Card>
+</CardGroup>

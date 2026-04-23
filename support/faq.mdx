@@ -1,0 +1,228 @@
+---
+title: 'OpenGame Frequently Asked Questions'
+description: 'Answers to common questions about game engines, models, sessions, providers, prompting, and the GameCoder-27B and OpenGame-Bench research tools.'
+---
+
+OpenGame is a young project with a lot of moving parts — a CLI, multiple AI provider integrations, a sandboxed browser runner, and a research-grade model and benchmark. The questions below cover the things users ask most often. If yours is not here, open a discussion on [GitHub](https://github.com/leigest519/OpenGame).
+
+<AccordionGroup>
+
+  <Accordion title="What game engines does OpenGame support?">
+
+    OpenGame is not tied to a single engine. The **Template Skill** component of Game Skill selects an appropriate engine and project scaffold based on your prompt. The engines currently in its library include:
+
+    - **HTML5 Canvas** — plain 2D rendering with no external runtime; ideal for simple arcade games
+    - **Phaser 3** — a full-featured HTML5 game framework with physics, tilemaps, and animations
+    - **three.js** — 3D rendering for perspective-based or first-person games
+
+    If you have a preference, specify it in your prompt:
+
+    ```
+    Use Phaser 3 for this.
+    Plain HTML5 canvas, no external libraries.
+    Use three.js for a 3D first-person view.
+    ```
+
+    OpenGame will honour the request and scaffold accordingly.
+
+  </Accordion>
+
+  <Accordion title="Can I use my own model instead of the default?">
+
+    Yes. OpenGame uses the OpenAI-compatible API format, so you can point it at any endpoint that speaks that protocol. Set the three environment variables before starting:
+
+    ```bash
+    export OPENAI_API_KEY="your-api-key-here"
+    export OPENAI_BASE_URL="https://your-provider.com/v1"   # optional
+    export OPENAI_MODEL="your-model-name"                    # optional
+    ```
+
+    This is also how you run **GameCoder-27B** locally — deploy it behind an OpenAI-compatible server and set `OPENAI_MODEL=GameCoder-27B` with the appropriate base URL.
+
+    You can also switch authentication methods from inside an interactive session with the `/auth` command.
+
+  </Accordion>
+
+  <Accordion title="What's the difference between interactive and headless mode?">
+
+    **Interactive mode** starts a full terminal UI where you type prompts, review what the agent is doing, approve (or reject) file edits and shell commands, and iterate conversationally:
+
+    ```bash
+    mkdir my-game && cd my-game
+    opengame
+    ```
+
+    **Headless mode** accepts a single prompt via `-p`, runs the agent end-to-end without a UI, and exits when the game is built or an error occurs. It is designed for scripts, CI pipelines, and benchmark runs:
+
+    ```bash
+    opengame -p "Build a Snake clone with WASD controls and a dark theme." --yolo
+    ```
+
+    In headless mode the approval mode is automatically elevated to `auto-edit` so the agent can write files without pausing. Pass `--yolo` (or `--approval-mode yolo`) to also allow shell commands to run without confirmation.
+
+  </Accordion>
+
+  <Accordion title="How do I write a better game prompt?">
+
+    The agent performs best when you are specific about the three things that matter most: gameplay mechanics, visual style, and engine preference.
+
+    **Be concrete about mechanics**
+
+    | Vague | Specific |
+    |-------|----------|
+    | "make a platformer" | "Build a single-screen platformer with arrow-key controls, double jump, 3 enemies that patrol left-right, and a goal flag at the top-right." |
+    | "make a shooter" | "Top-down shooter, twin-stick controls, 5 enemy types with distinct movement patterns, wave-based spawning up to level 10." |
+
+    **Specify visual style when it matters**
+
+    - "16-bit pixel art, 90s arcade cabinet aesthetic"
+    - "Flat pastel art, kawaii style"
+    - "Minimalist, monochrome, vector shapes only"
+
+    **Iterate one feature at a time**
+
+    Build the core game loop first, then add polish in separate turns:
+
+    ```
+    Turn 1: Build the core platformer with movement and collision.
+    Turn 2: Add a score counter and coin collectibles.
+    Turn 3: Add background music and jump sound effects.
+    ```
+
+  </Accordion>
+
+  <Accordion title="Why is my game not playable?">
+
+    If the game loads but something is broken — controls do not respond, the game loop freezes, assets are missing — the most reliable approach is to involve **Debug Skill** explicitly. Describe the symptom precisely and OpenGame will reopen the game in the sandbox, observe the error, and apply a fix:
+
+    ```
+    Pressing space to shoot does nothing. The browser console shows:
+    "Uncaught TypeError: this.bullets is undefined". Fix it.
+    ```
+
+    Other things to check:
+
+    - **Approval mode**: if the approval mode is `plan` or `default`, the agent cannot write files or run commands without your confirmation. Switch to `auto-edit` or `yolo` for autonomous iteration, or manually approve each step.
+    - **Sandbox**: if sandboxing is enabled and the game's dev server cannot start inside the container, try running it outside the sandbox first to isolate the issue.
+    - **Debug mode**: run with `DEBUG=1 opengame ...` to see the full agent reasoning and tool call log.
+
+  </Accordion>
+
+  <Accordion title="Can I iterate on a generated game?">
+
+    Yes — iteration is the primary way to use OpenGame. After the initial game is built, just keep typing in the same session:
+
+    ```
+    add a power-up that doubles the snake's speed for 5 seconds
+    make the background a starfield instead of solid black
+    the snake passes through itself when going fast — fix that
+    ```
+
+    OpenGame edits the relevant files, re-runs the game in the sandbox, and verifies the change before stopping. You never need to start over.
+
+  </Accordion>
+
+  <Accordion title="Where are my settings stored?">
+
+    OpenGame reads settings from two JSON files, applied in order (project settings override user settings):
+
+    | File | Scope |
+    |------|-------|
+    | `~/.qwen/settings.json` | All sessions for the current user |
+    | `.qwen/settings.json` | The current project only |
+
+    <Note>
+      The on-disk settings directory is still named `.qwen` for backward compatibility with the upstream qwen-code runtime. A migration to `.opengame` is planned for a future release.
+    </Note>
+
+    Environment variables always take precedence over both files. Command-line arguments take precedence over environment variables. See [Configuration](/configuration/settings) for the full settings reference.
+
+  </Accordion>
+
+  <Accordion title="What is GameCoder-27B?">
+
+    GameCoder-27B is a code LLM built specifically for OpenGame. Unlike a general-purpose coding model, it is trained on game-development trajectories — engine APIs, project scaffolding patterns, and bug-fix workflows — and fine-tuned with execution-grounded reinforcement learning that rewards actual game playability rather than static code correctness.
+
+    Training proceeds in three stages:
+
+    1. **Continual pre-training** on game engine documentation and source code
+    2. **Supervised fine-tuning (SFT)** on curated game-development trajectories
+    3. **Reinforcement learning** with reward signals from OpenGame-Bench-style playability verifiers
+
+    You can use GameCoder-27B by deploying it behind any OpenAI-compatible server and pointing OpenGame at it via `OPENAI_MODEL` and `OPENAI_BASE_URL`.
+
+  </Accordion>
+
+  <Accordion title="What is OpenGame-Bench?">
+
+    OpenGame-Bench is an evaluation pipeline for measuring how well an agent builds interactive web games. Unlike static code-evaluation benchmarks, it:
+
+    1. Launches the generated game in a headless browser
+    2. Drives it with scripted interactions
+    3. Scores it across three dimensions: **Build Health** (does it compile and run?), **Visual Usability** (does the screen render something playable?), and **Intent Alignment** (does the game match the prompt?)
+
+    Scoring uses headless browser execution combined with a VLM judge. The benchmark covers 150 diverse game prompts. OpenGame-Bench is used internally to guide model training and will be released as a standalone evaluation tool soon.
+
+  </Accordion>
+
+  <Accordion title="Do I need all four providers configured?">
+
+    No. The four modalities — `reasoning`, `image`, `video`, `audio` — are each optional and independent. OpenGame starts fine with none of them configured. You will only see an error when the agent tries to invoke a tool for an unconfigured modality.
+
+    - **`video`** is optional. Without it, animation frames fall back to image-to-image generation.
+    - **`audio`** is optional. Without it, audio falls back to procedural placeholders.
+    - **`image`** is required for any asset generation (backgrounds, sprites, tilesets).
+    - **`reasoning`** is required for non-trivial games that use `classify-game-type`, `generate-gdd`, or ABC-notation audio generation.
+
+    You can mix providers across modalities. For example, use DashScope for image generation and OpenAI for reasoning. See [API Keys & Provider Configuration](/configuration/api-keys) for the full variable list.
+
+  </Accordion>
+
+  <Accordion title="How do I share my generated game?">
+
+    Each generated game is a self-contained web project in the folder you created. To share it:
+
+    - **Run it locally and share the URL**: `npm run dev` starts a dev server (typically at `http://localhost:5173`). Use a tunneling tool like `ngrok` to expose it.
+    - **Deploy as a static site**: build the game with `npm run build` and deploy the output folder to any static hosting service (Netlify, Vercel, GitHub Pages, etc.).
+    - **Share the source**: zip the folder and send it. Recipients can run it with `npm install && npm run dev`.
+
+    Demo games from the OpenGame paper can be run locally with:
+
+    ```bash
+    unzip demo_*.zip && cd demo_*
+    npm install
+    npm run dev   # opens at http://localhost:5173
+    ```
+
+  </Accordion>
+
+  <Accordion title="Is there a way to save and resume sessions?">
+
+    Yes. When `general.checkpointing.enabled` is set to `true` in your `settings.json`, OpenGame saves session checkpoints that you can resume later.
+
+    To continue a previous conversation in an interactive session, use the `/resume` command or pass `--continue` when launching:
+
+    ```bash
+    opengame --continue
+    ```
+
+    OpenGame also automatically detects if you are returning to a project with a previously generated project summary (`.qwen/PROJECT_SUMMARY.md`) and offers to continue where you left off. This behaviour is controlled by the `enableWelcomeBack` setting (default: `true`).
+
+  </Accordion>
+
+</AccordionGroup>
+
+<CardGroup cols={2}>
+  <Card title="Troubleshooting" icon="wrench" href="/support/troubleshooting">
+    Step-by-step fixes for installation, sandbox, authentication, and MCP errors.
+  </Card>
+  <Card title="Quickstart" icon="rocket" href="/quickstart">
+    Generate your first game in five minutes.
+  </Card>
+  <Card title="API Keys & Providers" icon="key" href="/configuration/api-keys">
+    Configure image, video, audio, and reasoning providers.
+  </Card>
+  <Card title="Headless mode" icon="terminal" href="/features/headless">
+    Run OpenGame in scripts, CI pipelines, and batch generation workflows.
+  </Card>
+</CardGroup>

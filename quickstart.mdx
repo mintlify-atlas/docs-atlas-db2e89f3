@@ -1,80 +1,256 @@
 ---
-title: "Quickstart"
-description: "Start building awesome documentation in minutes"
+title: "Quickstart: Generate Your First Web Game with OpenGame"
+description: "Install OpenGame, configure your API key, and generate a fully playable browser game from a single prompt — from zero to playable in under five minutes."
 ---
 
-## Get started in three steps
+OpenGame turns a plain-language description into a fully playable web game. This guide walks you through installing the CLI, configuring your API key, and running your first generation — from zero to a working, browser-playable game in under five minutes.
 
-Get your documentation site running locally and make your first customization.
+## Before you begin
 
-### Step 1: Set up your local environment
+Make sure you have:
+
+- [Node.js 20 or later](https://nodejs.org/en/download) — run `node -v` to check
+- An OpenAI-compatible API key (or a local deployment of GameCoder-27B)
+- A terminal and an empty folder for your game
+
+## Installation and setup
+
+<Steps>
+  <Step title="Clone and build OpenGame">
+    Install OpenGame from source while the npm package is being prepared:
+
+    ```bash
+    git clone https://github.com/leigest519/OpenGame.git
+    cd OpenGame
+    npm install
+    npm run build
+    npm link
+    ```
+
+    The `npm link` step exposes the `opengame` command globally on your `PATH`. Verify the install:
+
+    ```bash
+    opengame --version
+    ```
+  </Step>
+
+  <Step title="Set your API key">
+    OpenGame's agent runtime uses any OpenAI-compatible API. Export the required environment variable:
+
+    ```bash
+    export OPENAI_API_KEY="your-api-key-here"
+    ```
+
+    Two optional variables let you point to a different endpoint or model:
+
+    ```bash
+    export OPENAI_BASE_URL="https://api.openai.com/v1"   # default
+    export OPENAI_MODEL="gpt-4o"                         # or swap in GameCoder-27B locally
+    ```
+
+    <Tip>
+      For the best game-coding accuracy, run [GameCoder-27B](/introduction#gamecoder-27b) locally and set `OPENAI_BASE_URL` to point at it. GameCoder-27B is purpose-trained on game engine APIs, project scaffolding, and bug-fix trajectories.
+    </Tip>
+  </Step>
+
+  <Step title="Configure asset providers (optional)">
+    OpenGame can generate images, videos, and audio assets during game creation. Each modality is configured independently, so you only need to set up the providers you want. You can mix providers freely:
+
+    ```bash
+    export OPENGAME_IMAGE_PROVIDER=tongyi         # tongyi | doubao | openai-compat
+    export OPENGAME_IMAGE_API_KEY=sk-...
+
+    # Similarly for video, audio, and reasoning:
+    # OPENGAME_VIDEO_PROVIDER, OPENGAME_VIDEO_API_KEY
+    # OPENGAME_AUDIO_PROVIDER, OPENGAME_AUDIO_API_KEY
+    # OPENGAME_REASONING_PROVIDER, OPENGAME_REASONING_API_KEY
+    ```
+
+    OpenGame prints a one-line provider-status banner at startup so you can confirm which modalities are active before the run begins.
+
+    <Note>
+      Asset providers are optional. OpenGame generates fully playable games without them — it just won't call out to external image or video APIs. See [API keys](/configuration/api-keys) for the full provider reference and a copy-paste `.env.example` template.
+    </Note>
+  </Step>
+
+  <Step title="Create a game folder">
+    OpenGame generates files into your current directory. Create an empty folder for your first game and navigate into it:
+
+    ```bash
+    mkdir snake-game && cd snake-game
+    ```
+
+    <Warning>
+      Run `opengame` from inside an empty folder dedicated to your game. The agent writes and modifies files directly in the working directory.
+    </Warning>
+  </Step>
+
+  <Step title="Start OpenGame and describe your game">
+    Launch the interactive session:
+
+    ```bash
+    opengame
+    ```
+
+    You'll see the OpenGame welcome screen. Type your game description at the prompt:
+
+    ```
+    Build a Snake clone with WASD controls and a dark theme.
+    ```
+
+    OpenGame will:
+
+    1. Plan the architecture — engine choice, file layout, game-loop structure, and state management.
+    2. Scaffold the project using **Template Skill** (selects the right engine and project skeleton).
+    3. Write the code across all necessary files.
+    4. Run the game in a sandboxed browser and use **Debug Skill** to catch and fix integration errors automatically.
+    5. Stop when the game is playable end-to-end.
+
+    When done, open the printed local URL or the generated `index.html` in your browser to play.
+  </Step>
+</Steps>
+
+## Iterate on your game
+
+Once the first generation is complete, keep the session open and describe what you want to change. OpenGame edits the relevant files, re-runs the game, and verifies the change:
+
+```
+add a power-up that doubles the snake's speed for 5 seconds
+```
+
+```
+make the background a starfield instead of solid black
+```
+
+```
+the snake passes through itself when going fast — fix that
+```
+
+Each message triggers a targeted edit-and-verify cycle rather than a full regeneration, so iterations are fast.
+
+## Headless mode
+
+For scripts, CI pipelines, and batch generation, skip the interactive UI and pass the prompt directly:
+
+```bash
+opengame -p "Build a memory-matching card game with 16 cards and a 60-second timer."
+```
+
+In headless mode, OpenGame automatically elevates the approval mode to `auto-edit` so it can write and modify files without waiting for confirmation. To also allow shell commands (installing dependencies, running the dev server), add `--yolo`:
+
+```bash
+opengame -p "Build a Snake clone with WASD controls and a dark theme." --yolo
+```
+
+If you want to generate games in a directory outside the OpenGame repo, set absolute paths for the template and docs stores:
+
+```bash
+export GAME_TEMPLATES_DIR="/absolute/path/to/OpenGame/agent-test/templates"
+export GAME_DOCS_DIR="/absolute/path/to/OpenGame/agent-test/docs"
+```
+
+See [Headless mode](/features/headless) for the full reference.
+
+## Essential commands
+
+Once inside an interactive session, use these commands to control OpenGame:
+
+| Command       | What it does                                        |
+| ------------- | --------------------------------------------------- |
+| `/help`       | Show available commands and keyboard shortcuts      |
+| `/auth`       | Switch authentication method or update your API key |
+| `/compress`   | Replace chat history with a summary to save tokens  |
+| `/clear`      | Clear the terminal screen                           |
+| `/theme`      | Change the OpenGame visual theme                    |
+| `/language`   | View or change language settings                    |
+| `/quit`       | Exit OpenGame                                       |
+
+See the [commands reference](/features/commands) for the full list.
+
+## Pro tips for game prompts
+
+Prompt quality has a direct impact on output quality. These patterns consistently produce better results:
 
 <AccordionGroup>
-  <Accordion icon="copy" title="Clone your docs locally">
-    During the onboarding process, you created a GitHub repository with your docs content if you didn't already have one. You can find a link to this repository in your [dashboard](https://dashboard.mintlify.com).
-    
-    To clone the repository locally so that you can make and preview changes to your docs, follow the [Cloning a repository](https://docs.github.com/en/repositories/creating-and-managing-repositories/cloning-a-repository) guide in the GitHub docs.
+  <Accordion title="Be specific about gameplay mechanics">
+    Vague prompts produce vague games. Include controls, win/loss conditions, enemy behavior, and any special mechanics.
+
+    Instead of:
+    ```
+    make a platformer
+    ```
+
+    Try:
+    ```
+    Build a single-screen platformer with arrow-key controls, double jump, 3 enemies that
+    patrol left-right, and a goal flag at the top-right. Player dies on contact with enemies.
+    ```
   </Accordion>
-  <Accordion icon="rectangle-terminal" title="Start the preview server">
-    1. Install the Mintlify CLI: `npm i -g mint`
-    2. Navigate to your docs directory and run: `mint dev`
-    3. Open `http://localhost:3000` to see your docs live!
-    
-    <Tip>Your preview updates automatically as you edit files.</Tip>
+
+  <Accordion title="Specify the engine if you have a preference">
+    OpenGame picks the engine automatically, but you can override the choice:
+
+    ```
+    Use Phaser 3 for this.
+    ```
+
+    ```
+    Plain HTML5 canvas, no external libraries.
+    ```
+
+    ```
+    Use three.js for a 3D first-person view.
+    ```
+
+    Supported engines are HTML5 canvas, Phaser, and three.js. See [Game Skill](/game-skill) for how the selection works.
+  </Accordion>
+
+  <Accordion title="Describe the art style">
+    OpenGame can target specific visual aesthetics if you describe them:
+
+    ```
+    90s Capcom arcade pixel art — high-contrast colors, no anti-aliasing.
+    ```
+
+    ```
+    Pastel kawaii hand-drawn style with rounded shapes.
+    ```
+
+    ```
+    Metallic sci-fi pixel art with a dark background.
+    ```
+  </Accordion>
+
+  <Accordion title="Iterate one feature at a time">
+    Make the core game loop work first, then add polish. Trying to specify sound, particles, menus, multiple levels, and a high-score board in the first prompt increases the chance of integration errors.
+
+    Start with:
+    ```
+    Build a Snake clone with WASD controls and a dark theme.
+    ```
+
+    Then iterate:
+    ```
+    add a high-score display in the top-right corner
+    add a start screen with the game title and a "Press Enter to play" prompt
+    add a crunch sound effect when the snake eats food
+    ```
   </Accordion>
 </AccordionGroup>
 
-### Step 2: Deploy your changes
-
-<AccordionGroup>
-  <Accordion icon="github" title="Install our GitHub app">
-    Install the Mintlify GitHub app from your [dashboard](https://dashboard.mintlify.com/settings/organization/github-app).
-    
-    Our GitHub app automatically deploys your changes to your docs site, so you don't need to manage deployments yourself.
-</Accordion>
-<Accordion icon="palette" title="Update your site name and colors">
-    For a first change, let's update the name and colors of your docs site.
-
-    1. Open `docs.json` in your editor.
-    2. Change the `"name"` field to your project name.
-    3. Update the `"colors"` to match your brand.
-    4. Save and see your changes instantly at `http://localhost:3000`.
-
-    <Tip>Try changing the primary color to see an immediate difference!</Tip>
-  </Accordion>
-</AccordionGroup>
-
-### Step 3: Go live
-
-<Accordion icon="rocket" title="Publish your docs">
-  1. Commit and push your changes.
-  2. Your docs will update and be live in moments!
-</Accordion>
-
-## Next steps
-
-Now that you have your docs running, explore these key features:
+## What's next
 
 <CardGroup cols={2}>
-
-<Card title="Write Content" icon="pen-to-square" href="/essentials/markdown">
-  Learn MDX syntax and start writing your documentation.
-</Card>
-
-<Card title="Customize style" icon="palette" href="/essentials/settings">
-  Make your docs match your brand perfectly.
-</Card>
-
-<Card title="Add code examples" icon="square-code" href="/essentials/code">
-  Include syntax-highlighted code blocks.
-</Card>
-
-<Card title="API documentation" icon="code" href="/api-reference/introduction">
-  Auto-generate API docs from OpenAPI specs.
-</Card>
-
+  <Card title="Game Skill" icon="screwdriver-wrench" href="/game-skill">
+    Understand how Template Skill and Debug Skill work together to ship a working game
+  </Card>
+  <Card title="API keys" icon="key" href="/configuration/api-keys">
+    Configure image, video, audio, and reasoning providers for full asset generation
+  </Card>
+  <Card title="Headless mode" icon="terminal" href="/features/headless">
+    Run OpenGame in scripts, CI, and batch generation workflows
+  </Card>
+  <Card title="TypeScript SDK" icon="code" href="/developers/sdk-typescript">
+    Integrate OpenGame programmatically into your own tools and applications
+  </Card>
 </CardGroup>
-
-<Note>
-  **Need help?** See our [full documentation](https://mintlify.com/docs) or join our [community](https://mintlify.com/community).
-</Note>

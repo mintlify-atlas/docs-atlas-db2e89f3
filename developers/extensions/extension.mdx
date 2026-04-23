@@ -1,0 +1,271 @@
+---
+title: "Building OpenGame extensions: format and capabilities"
+description: "Full reference for the qwen-extension.json manifest: custom commands, MCP servers, context files, tool exclusions, variables, and conflict resolution."
+---
+
+An OpenGame extension is a directory containing a `qwen-extension.json` manifest file plus any supporting files — MCP server scripts, command definitions, and context documents. This page covers every field in the manifest, how to add custom slash commands, how to register MCP servers, how to inject context, and how variable substitution works. The examples are drawn directly from the official example extensions shipped with OpenGame.
+
+## Extension directory layout
+
+A minimal extension looks like this:
+
+```
+my-extension/
+├── qwen-extension.json   # required
+└── QWEN.md               # optional context file
+```
+
+A fully featured extension with commands and an MCP server:
+
+```
+my-extension/
+├── qwen-extension.json
+├── QWEN.md
+├── server.js             # MCP server script
+└── commands/
+    ├── deploy.toml
+    └── gcs/
+        └── sync.toml
+```
+
+The directory name must match the `name` field in `qwen-extension.json`. OpenGame uses this name as the identifier for all CLI management commands and for conflict resolution.
+
+## The `qwen-extension.json` manifest
+
+The manifest controls everything the extension registers with OpenGame. All fields except `name` and `version` are optional.
+
+```json
+{
+  "name": "my-extension",
+  "version": "1.0.0",
+  "mcpServers": {
+    "my-server": {
+      "command": "node ${extensionPath}${/}server.js"
+    }
+  },
+  "contextFileName": "QWEN.md",
+  "excludeTools": ["run_shell_command"]
+}
+```
+
+### Manifest fields
+
+<AccordionGroup>
+  <Accordion title="name (required)">
+    The unique identifier for your extension. Rules:
+
+    - Lowercase letters, numbers, and dashes only — no underscores or spaces
+    - Must match the extension's directory name exactly
+    - Users refer to your extension by this name in all `opengame extensions` commands
+
+    ```json
+    { "name": "gcp-toolkit" }
+    ```
+  </Accordion>
+
+  <Accordion title="version (required)">
+    A version string used by `opengame extensions update` to detect when a new version is available. OpenGame treats any change to this field as a new version.
+
+    ```json
+    { "version": "2.1.0" }
+    ```
+  </Accordion>
+
+  <Accordion title="mcpServers">
+    A map of MCP server configurations to load when the extension is active. The key is the server name; the value is an `MCPServerConfig` object. All configuration options supported in `settings.json` are supported here, except `trust`.
+
+    If both an extension and `settings.json` define an MCP server with the same name, the `settings.json` entry takes precedence.
+
+    ```json
+    {
+      "mcpServers": {
+        "my-server": {
+          "command": "node",
+          "args": ["${extensionPath}${/}server.js"],
+          "env": { "API_KEY": "..." }
+        },
+        "remote-server": {
+          "url": "https://my-mcp-server.example.com/sse"
+        }
+      }
+    }
+    ```
+
+    Supported transport types:
+    - **stdio**: `command`, `args`, `env`, `cwd`
+    - **SSE**: `url`
+    - **Streamable HTTP**: `httpUrl`, `headers`
+  </Accordion>
+
+  <Accordion title="contextFileName">
+    The name of a file in the extension directory whose contents are injected as conversation context when the extension is active. Defaults to `QWEN.md` if a file with that name exists, even if `contextFileName` is not set.
+
+    ```json
+    { "contextFileName": "SYSTEM_PROMPT.md" }
+    ```
+
+    Use this to give the AI background knowledge about your extension's domain — for example, information about your internal APIs or preferred coding conventions.
+  </Accordion>
+
+  <Accordion title="excludeTools">
+    An array of tool names (or patterns) to disable for any session where the extension is active. Excluded tools are blocked for the entire conversation and affect all subsequent queries in the session.
+
+    ```json
+    {
+      "excludeTools": [
+        "run_shell_command",
+        "ShellTool(rm -rf)"
+      ]
+    }
+    ```
+
+    Pattern matching follows the same rules as the SDK's `excludeTools` option:
+    - Tool name: `"write_file"`
+    - Tool class: `"ShellTool"`
+    - Shell command prefix: `"ShellTool(git push --force)"` blocks commands starting with that prefix
+
+    <Warning>
+    `excludeTools` in an extension affects the entire session context, not just queries triggered by the extension's commands. Plan carefully when restricting powerful tools.
+    </Warning>
+  </Accordion>
+</AccordionGroup>
+
+## Custom commands
+
+Extensions can provide slash commands by placing TOML files in a `commands/` subdirectory. These follow the same format as user and project custom commands.
+
+### Command file structure
+
+Each `.toml` file in `commands/` defines one command. Nested directories create namespaced commands using the `:` separator.
+
+```
+commands/
+├── deploy.toml         → /deploy
+└── gcs/
+    └── sync.toml       → /gcs:sync
+```
+
+A minimal command definition:
+
+```toml
+description = "Deploy the current project to production"
+prompt = """
+Review the current project and deploy it using the standard deployment pipeline.
+Report any errors you encounter.
+"""
+```
+
+### Conflict resolution
+
+Extension commands have the lowest precedence. When a command name conflicts with a user or project command:
+
+1. **No conflict** — the extension command keeps its natural name, for example `/deploy`
+2. **With conflict** — the extension command is prefixed with the extension name, for example `/gcp.deploy`
+
+The CLI help output marks extension commands with a `[extension-name]` tag so users can distinguish them.
+
+**Example:** An extension named `gcp` alongside a user-defined `deploy` command:
+
+- `/deploy` — executes the user's command
+- `/gcp.deploy` — executes the extension's command (shown as `[gcp] Custom command from deploy.toml`)
+
+## Variable substitution
+
+The manifest supports several built-in variables you can embed anywhere in string values using `${variableName}` syntax.
+
+| Variable | Description |
+|----------|-------------|
+| `${extensionPath}` | Fully-qualified path to the extension directory, for example `/Users/alice/.qwen/extensions/my-extension`. Does not resolve symlinks. |
+| `${workspacePath}` | Fully-qualified path of the current workspace. |
+| `${/}` or `${pathSeparator}` | The OS path separator (`/` on macOS/Linux, `\` on Windows). |
+
+Use these variables to write cross-platform MCP server configurations:
+
+```json
+{
+  "mcpServers": {
+    "my-server": {
+      "command": "node",
+      "args": ["${extensionPath}${/}server.js"],
+      "cwd": "${extensionPath}"
+    }
+  }
+}
+```
+
+## Complete example: GCP toolkit extension
+
+This example shows a production-ready extension that registers an MCP server and exposes two commands:
+
+```
+gcp/
+├── qwen-extension.json
+├── QWEN.md
+├── mcp-server.js
+└── commands/
+    ├── deploy.toml
+    └── gcs/
+        └── sync.toml
+```
+
+**`qwen-extension.json`**:
+
+```json
+{
+  "name": "gcp",
+  "version": "1.0.0",
+  "mcpServers": {
+    "gcp-tools": {
+      "command": "node",
+      "args": ["${extensionPath}${/}mcp-server.js"],
+      "env": {
+        "PROJECT_ID": "my-gcp-project"
+      },
+      "cwd": "${extensionPath}"
+    }
+  },
+  "contextFileName": "QWEN.md",
+  "excludeTools": ["ShellTool(gcloud auth)"]
+}
+```
+
+**`QWEN.md`**:
+
+```markdown
+# GCP Toolkit Context
+
+This extension provides tools for working with Google Cloud Platform.
+Always use the `gcp-tools` MCP server for GCP operations rather than raw `gcloud` CLI commands.
+Prefer the `deploy` command for production deployments.
+```
+
+**`commands/deploy.toml`**:
+
+```toml
+description = "Deploy the current project to Google Cloud Run"
+prompt = """
+Using the gcp-tools MCP server, deploy the current project to Google Cloud Run.
+Use the PROJECT_ID from the environment. Report the deployment URL when complete.
+"""
+```
+
+## Development workflow
+
+<Steps>
+  <Step title="Create your extension directory">
+    ```bash
+    opengame extensions new ./my-extension mcp-server
+    ```
+  </Step>
+  <Step title="Link it for live reloading">
+    ```bash
+    opengame extensions link ./my-extension
+    ```
+  </Step>
+  <Step title="Edit and test">
+    Make changes to your extension files. Start a new OpenGame session to pick up the changes. List active extensions with `/extensions list`.
+  </Step>
+  <Step title="Release">
+    When your extension is ready, publish it through a git repository or GitHub Releases. See [Releasing extensions](/developers/extensions/releasing).
+  </Step>
+</Steps>

@@ -1,0 +1,374 @@
+---
+title: 'File System Tools Reference — OpenGame Developer Guide'
+description: 'Complete reference for all seven OpenGame file system tools: read_file, write_file, edit, read_many_files, list_directory, glob, and grep_search.'
+---
+
+File system tools are the foundation of everything OpenGame does during game generation. Before writing a single line of game code the agent reads your project structure, inspects existing templates, searches for relevant patterns, and then makes targeted edits. All tools operate within a `rootDirectory` — the working directory from which you launched the CLI — so no operation can reach outside your project without an absolute path you have explicitly provided.
+
+<Note>
+Paths supplied to these tools should be absolute. Relative paths are resolved against the `rootDirectory`. Tools will refuse to operate on paths that escape the root for security reasons.
+</Note>
+
+## `list_directory`
+
+`list_directory` lists the names and types of entries directly within a directory. It is the first tool the agent calls when it needs a high-level picture of your project layout.
+
+**Tool name:** `list_directory` | **Display name:** `ListFiles` | **File:** `ls.ts` | **Confirmation:** No
+
+<AccordionGroup>
+  <Accordion title="Parameters">
+    <ParamField path="path" type="string" required>
+      Absolute path to the directory to list.
+    </ParamField>
+    <ParamField path="ignore" type="string[]">
+      Glob patterns to exclude from the listing (e.g. `["*.log", ".git"]`).
+    </ParamField>
+    <ParamField path="respect_git_ignore" type="boolean">
+      When `true` (default), entries matched by `.gitignore` are omitted.
+    </ParamField>
+  </Accordion>
+  <Accordion title="Output format">
+    A plain-text listing sorted directories-first then alphabetically:
+
+    ```
+    Directory listing for /path/to/folder:
+    [DIR] assets
+    [DIR] src
+    index.html
+    package.json
+    ```
+  </Accordion>
+</AccordionGroup>
+
+**Example — list the `src` directory:**
+
+```
+list_directory(path="/absolute/path/to/project/src")
+```
+
+---
+
+## `read_file`
+
+`read_file` returns the content of a single file. It handles plain text, images (PNG, JPG, GIF, WEBP, SVG, BMP), and PDF files. When `offset` and `limit` are supplied the tool returns only the requested line range, which keeps context windows manageable when reading large source files.
+
+**Tool name:** `read_file` | **Display name:** `ReadFile` | **File:** `read-file.ts` | **Confirmation:** No
+
+<AccordionGroup>
+  <Accordion title="Parameters">
+    <ParamField path="path" type="string" required>
+      Absolute path to the file to read.
+    </ParamField>
+    <ParamField path="offset" type="number">
+      0-based line number to start reading from. Requires `limit`.
+    </ParamField>
+    <ParamField path="limit" type="number">
+      Maximum number of lines to read. Defaults to 2000 lines when omitted.
+    </ParamField>
+  </Accordion>
+  <Accordion title="Output format">
+    - **Text files:** File content, optionally prefixed with a truncation notice:
+      ```
+      [File content truncated: showing lines 1-100 of 500 total lines...]
+      <file content here>
+      ```
+    - **Image / PDF files:** An inline data object: `{ inlineData: { mimeType: 'image/png', data: '<base64>' } }`
+    - **Other binary files:** `Cannot display content of binary file: /path/to/data.bin`
+  </Accordion>
+</AccordionGroup>
+
+<Tabs>
+  <Tab title="Read a whole file">
+    ```
+    read_file(path="/project/src/game.ts")
+    ```
+  </Tab>
+  <Tab title="Read lines 200–300">
+    ```
+    read_file(path="/project/src/game.ts", offset=200, limit=100)
+    ```
+  </Tab>
+  <Tab title="Read an image">
+    ```
+    read_file(path="/project/assets/hero-sprite.png")
+    ```
+  </Tab>
+</Tabs>
+
+---
+
+## `write_file`
+
+`write_file` creates a new file or completely overwrites an existing one. Parent directories are created automatically. Because this tool replaces the entire file content, OpenGame shows you a diff and waits for your approval before writing.
+
+**Tool name:** `write_file` | **Display name:** `WriteFile` | **File:** `write-file.ts` | **Confirmation:** Yes — diff shown before writing
+
+<AccordionGroup>
+  <Accordion title="Parameters">
+    <ParamField path="file_path" type="string" required>
+      Absolute path to the file to create or overwrite.
+    </ParamField>
+    <ParamField path="content" type="string" required>
+      The full content to write into the file.
+    </ParamField>
+  </Accordion>
+  <Accordion title="Output format">
+    On success: `Successfully created and wrote to new file: /path/to/file.txt`
+    or `Successfully overwrote file: /path/to/file.txt`
+  </Accordion>
+</AccordionGroup>
+
+**Example — write a new game configuration file:**
+
+```
+write_file(
+  file_path="/project/src/config/game.config.ts",
+  content="export const GAME_WIDTH = 800;\nexport const GAME_HEIGHT = 600;\n"
+)
+```
+
+<Warning>
+`write_file` replaces the entire file. Use `edit` when you only need to change a specific region — this avoids accidental data loss and produces a cleaner diff for review.
+</Warning>
+
+---
+
+## `edit`
+
+`edit` replaces a specific string within a file with a new string. It is designed for surgical, targeted changes: the `old_string` must uniquely identify the location to change. When `replace_all` is `true`, every occurrence is replaced.
+
+**Tool name:** `edit` | **Display name:** `Edit` | **File:** `edit.ts` | **Confirmation:** Yes — diff shown before writing
+
+<AccordionGroup>
+  <Accordion title="Parameters">
+    <ParamField path="file_path" type="string" required>
+      Absolute path to the file to modify.
+    </ParamField>
+    <ParamField path="old_string" type="string" required>
+      The exact literal text to find and replace. Must uniquely identify a single location (unless `replace_all` is `true`). Include surrounding context lines to guarantee uniqueness. If empty and `file_path` does not exist, the tool creates a new file with `new_string` as content.
+    </ParamField>
+    <ParamField path="new_string" type="string" required>
+      The text to substitute in place of `old_string`.
+    </ParamField>
+    <ParamField path="replace_all" type="boolean">
+      When `true`, replaces every occurrence of `old_string`. Defaults to `false`.
+    </ParamField>
+  </Accordion>
+  <Accordion title="Multi-stage edit correction">
+    If the initial `old_string` is not found or matches multiple locations, the tool attempts to auto-correct by iteratively refining the search string using the model before failing. Despite this mechanism the tool will fail when:
+
+    - `file_path` is not absolute or escapes the root directory.
+    - `old_string` is non-empty but `file_path` does not exist.
+    - `old_string` is empty but `file_path` already exists.
+    - Correction attempts cannot narrow the match to a single location.
+  </Accordion>
+  <Accordion title="Output format">
+    On success: `Successfully modified file: /path/to/file.txt (1 replacements).`
+    On failure: An error message explaining the reason.
+  </Accordion>
+</AccordionGroup>
+
+<Tabs>
+  <Tab title="Single replacement">
+    ```
+    edit(
+      file_path="/project/src/game.ts",
+      old_string="const SPEED = 100;",
+      new_string="const SPEED = 200;"
+    )
+    ```
+  </Tab>
+  <Tab title="Replace all occurrences">
+    ```
+    edit(
+      file_path="/project/src/player.ts",
+      old_string="console.log(",
+      new_string="logger.debug(",
+      replace_all=true
+    )
+    ```
+  </Tab>
+  <Tab title="Create a new file">
+    ```
+    edit(
+      file_path="/project/src/constants.ts",
+      old_string="",
+      new_string="export const MAX_ENEMIES = 50;\n"
+    )
+    ```
+  </Tab>
+</Tabs>
+
+---
+
+## `read_many_files`
+
+`read_many_files` reads multiple files in a single call by accepting an array of glob patterns or explicit paths. The agent uses this tool extensively during the analysis phase — for example, reading every TypeScript file in `src/` before deciding how to scaffold new game code. Output for text files is concatenated with `--- {filePath} ---` separators.
+
+**Tool name:** `read_many_files` | **Display name:** `ReadManyFiles` | **File:** `read-many-files.ts` | **Confirmation:** No
+
+<AccordionGroup>
+  <Accordion title="Parameters">
+    <ParamField path="paths" type="string[]" required>
+      Array of glob patterns or explicit file paths (e.g. `["src/**/*.ts", "README.md"]`). A bare directory path like `"/docs"` returns nothing — use `"/docs/*"` instead.
+    </ParamField>
+    <ParamField path="exclude" type="string[]">
+      Glob patterns for files or directories to skip (e.g. `["**/*.log", "temp/"]`).
+    </ParamField>
+    <ParamField path="include" type="string[]">
+      Additional glob patterns merged with `paths`. Useful for pulling in files that a broad pattern might miss.
+    </ParamField>
+    <ParamField path="recursive" type="boolean">
+      Controlled primarily by `**` in glob patterns. Defaults to `true`.
+    </ParamField>
+    <ParamField path="useDefaultExcludes" type="boolean">
+      When `true` (default), common noise directories such as `node_modules` and `.git` are automatically excluded.
+    </ParamField>
+    <ParamField path="respect_git_ignore" type="boolean">
+      Respects `.gitignore` patterns when `true` (default).
+    </ParamField>
+  </Accordion>
+  <Accordion title="Binary file handling">
+    - **Images, PDFs, audio, video:** Returned as base64-encoded data when explicitly targeted (e.g. `paths: ["logo.png"]` or `include: ["*.mp4"]`).
+    - **Other binary files:** Detected by scanning for null bytes in the initial content and silently skipped.
+  </Accordion>
+</AccordionGroup>
+
+<Tabs>
+  <Tab title="All TypeScript files">
+    ```
+    read_many_files(paths=["src/**/*.ts"])
+    ```
+  </Tab>
+  <Tab title="Docs + specific image">
+    ```
+    read_many_files(
+      paths=["README.md", "docs/**/*.md", "assets/logo.png"],
+      exclude=["docs/OLD_README.md"]
+    )
+    ```
+  </Tab>
+  <Tab title="JS files including tests">
+    ```
+    read_many_files(
+      paths=["**/*.js"],
+      include=["**/*.test.js"],
+      useDefaultExcludes=false
+    )
+    ```
+  </Tab>
+</Tabs>
+
+---
+
+## `glob`
+
+`glob` finds files whose paths match a glob pattern and returns their absolute paths sorted by modification time (newest first). Results are capped at 100 entries to prevent context overflow.
+
+**Tool name:** `glob` | **Display name:** `Glob` | **File:** `glob.ts` | **Confirmation:** No
+
+<AccordionGroup>
+  <Accordion title="Parameters">
+    <ParamField path="pattern" type="string" required>
+      The glob pattern to match (e.g. `"*.py"`, `"src/**/*.js"`).
+    </ParamField>
+    <ParamField path="path" type="string">
+      Directory to search in. Defaults to the current working directory.
+    </ParamField>
+  </Accordion>
+  <Accordion title="Output format">
+    ```
+    Found 5 file(s) matching "*.ts" within /project/src, sorted by modification time (newest first):
+    ---
+    /project/src/player.ts
+    /project/src/enemy.ts
+    /project/src/game.ts
+    ---
+    ```
+  </Accordion>
+</AccordionGroup>
+
+<Tabs>
+  <Tab title="Find TypeScript files">
+    ```
+    glob(pattern="src/**/*.ts")
+    ```
+  </Tab>
+  <Tab title="Find configs in a subdirectory">
+    ```
+    glob(pattern="*.json", path="/project/config")
+    ```
+  </Tab>
+</Tabs>
+
+<Tip>
+`glob` respects both `.gitignore` and `.qwenignore` patterns by default. Create a `.qwenignore` file to hide generated or build artefacts from the agent's view without affecting git.
+</Tip>
+
+---
+
+## `grep_search`
+
+`grep_search` searches for a regular-expression pattern within file content and returns matching lines with their file paths and line numbers. It uses `ripgrep` when available and falls back to a JavaScript-based implementation otherwise. Results are case-insensitive by default.
+
+**Tool name:** `grep_search` | **Display name:** `Grep` | **File:** `grep.ts` (with `ripGrep.ts` fallback) | **Confirmation:** No
+
+<AccordionGroup>
+  <Accordion title="Parameters">
+    <ParamField path="pattern" type="string" required>
+      Regular expression pattern to search for (e.g. `"function\\s+myFunction"`, `"log.*Error"`).
+    </ParamField>
+    <ParamField path="path" type="string">
+      File or directory to search in. Defaults to the current working directory.
+    </ParamField>
+    <ParamField path="glob" type="string">
+      Glob pattern to filter which files are searched (e.g. `"*.js"`, `"src/**/*.{ts,tsx}"`).
+    </ParamField>
+    <ParamField path="limit" type="number">
+      Limit output to the first N matching lines. Shows all matches when omitted.
+    </ParamField>
+  </Accordion>
+  <Accordion title="Output format">
+    ```
+    Found 3 matches for pattern "myFunction" in path "." (filter: "*.ts"):
+    ---
+    src/utils.ts:15:export function myFunction() {
+    src/utils.ts:22:  myFunction.call();
+    src/index.ts:5:import { myFunction } from './utils';
+    ---
+    ```
+  </Accordion>
+</AccordionGroup>
+
+<Tabs>
+  <Tab title="Basic search">
+    ```
+    grep_search(pattern="function\\s+update", path="src")
+    ```
+  </Tab>
+  <Tab title="With file filter">
+    ```
+    grep_search(pattern="function", glob="*.js", limit=10)
+    ```
+  </Tab>
+  <Tab title="Limit results">
+    ```
+    grep_search(pattern="TODO", path="src", limit=50)
+    ```
+  </Tab>
+</Tabs>
+
+---
+
+## How file tools work together during game generation
+
+When you ask OpenGame to add a new enemy type, the agent typically orchestrates these tools in sequence:
+
+1. **`list_directory`** — maps the project structure to locate `src/entities/`.
+2. **`read_many_files`** — reads all existing entity files to learn the pattern.
+3. **`grep_search`** — finds every place the existing entity is registered or imported.
+4. **`read_file`** — reads the specific template file it wants to base the new entity on.
+5. **`edit`** — inserts the new entity registration into the game's entity registry.
+6. **`write_file`** — writes the new entity source file.
+
+Each step is visible in the CLI output so you always know what the agent is reading or writing.

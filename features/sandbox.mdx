@@ -1,0 +1,248 @@
+---
+title: 'Sandboxing OpenGame with Seatbelt and Docker/Podman'
+description: 'Isolate OpenGame tool execution using macOS Seatbelt or Docker/Podman containers to prevent accidental system damage during shell command runs.'
+---
+
+Sandboxing wraps OpenGame's tool execution in a security boundary so that shell commands and file writes cannot reach outside your project directory. When you enable it, potentially dangerous operations — like running untrusted build scripts or modifying system files — are constrained to a controlled environment that cannot permanently damage your machine.
+
+<Note>
+Some sandbox-related environment variables still use the `GEMINI_*` prefix for backwards compatibility.
+</Note>
+
+## Sandboxing methods
+
+OpenGame supports two sandboxing strategies. Choose based on your platform and isolation requirements.
+
+<CardGroup cols={2}>
+  <Card title="macOS Seatbelt" icon="apple" href="/features/sandbox#macos-seatbelt">
+    Lightweight, built-in sandboxing using `sandbox-exec`. No Docker required. Restricts writes outside the project directory while allowing most other operations.
+  </Card>
+  <Card title="Docker / Podman" icon="box" href="/features/sandbox#docker-podman">
+    Cross-platform container isolation. Complete process isolation in a known Linux image. Works on macOS, Linux, and Windows.
+  </Card>
+</CardGroup>
+
+**Choosing a method:**
+
+- On **macOS** — use Seatbelt for lightweight sandboxing; use Docker/Podman when you need Linux-specific binaries.
+- On **Linux / Windows** — use Docker or Podman.
+
+---
+
+## Quick start
+
+<Steps>
+  <Step title="Enable the sandbox">
+    Choose any of the three equivalent approaches:
+
+    ```bash
+    # CLI flag
+    opengame -s -p "analyze the code structure"
+
+    # Environment variable (recommended for CI)
+    export GEMINI_SANDBOX=true
+    opengame -p "run the test suite"
+    ```
+
+    Or add it permanently to your project settings:
+
+    ```json
+    {
+      "tools": {
+        "sandbox": true
+      }
+    }
+    ```
+  </Step>
+  <Step title="Run your prompt">
+    OpenGame automatically picks the right sandbox provider for your platform and launches the tool execution inside it.
+  </Step>
+</Steps>
+
+<Tip>
+Provider auto-selection: on **macOS**, `GEMINI_SANDBOX=true` picks `sandbox-exec`. On **Linux/Windows** it requires `docker` or `podman` to be installed. To force a specific provider: `GEMINI_SANDBOX=docker|podman|sandbox-exec`.
+</Tip>
+
+---
+
+## Configuration
+
+### Enabling sandboxing (precedence order)
+
+1. **Environment variable** — `GEMINI_SANDBOX=true|false|docker|podman|sandbox-exec`
+2. **CLI flag** — `-s`, `--sandbox`, or `--sandbox=<provider>`
+3. **Settings file** — `tools.sandbox` in `settings.json`
+
+<Warning>
+When `GEMINI_SANDBOX` is set in the environment, it overrides both the CLI flag and `settings.json`.
+</Warning>
+
+### Configuring the sandbox image (Docker/Podman)
+
+| Method | Value |
+| --- | --- |
+| CLI flag | `--sandbox-image <image>` |
+| Environment variable | `GEMINI_SANDBOX_IMAGE=<image>` |
+
+If neither is set, OpenGame uses the default image bundled with the CLI (e.g., `ghcr.io/leigest519/opengame:<version>`).
+
+---
+
+## macOS Seatbelt
+
+macOS Seatbelt uses `sandbox-exec` to enforce file-system and network policies without any container overhead. A profile defines exactly what the sandboxed process is allowed to do.
+
+### Built-in profiles
+
+Set the active profile via the `SEATBELT_PROFILE` environment variable:
+
+| Profile | Write restrictions | Network |
+| --- | --- | --- |
+| `permissive-open` *(default)* | Outside project directory | Allowed |
+| `permissive-closed` | Outside project directory | Blocked |
+| `permissive-proxied` | Outside project directory | Via proxy |
+| `restrictive-open` | Strict | Allowed |
+| `restrictive-closed` | Maximum restrictions | Blocked |
+| `restrictive-proxied` | Strict | Via proxy |
+
+<Tip>
+Start with `permissive-open`, then tighten to `restrictive-closed` if your workflow still works correctly.
+</Tip>
+
+### Custom Seatbelt profiles
+
+<Steps>
+  <Step title="Create the profile file">
+    Add a file named `.qwen/sandbox-macos-<profile_name>.sb` in your project root and write your custom Seatbelt policy.
+  </Step>
+  <Step title="Activate the profile">
+    ```bash
+    export SEATBELT_PROFILE=<profile_name>
+    opengame -s -p "your prompt"
+    ```
+  </Step>
+</Steps>
+
+---
+
+## Docker / Podman
+
+Container-based sandboxing gives you a complete Linux process boundary. The model's shell commands run inside the container; only explicitly mounted paths are accessible.
+
+### Custom Dockerfile
+
+If the default sandbox image is missing tools your project needs (e.g., `git`, `python`, `rg`):
+
+<Steps>
+  <Step title="Create a custom Dockerfile">
+    Add `.qwen/sandbox.Dockerfile` to your project:
+
+    ```dockerfile
+    # .qwen/sandbox.Dockerfile
+    FROM ghcr.io/leigest519/opengame:latest
+
+    RUN apt-get update && apt-get install -y ripgrep python3
+    ```
+  </Step>
+  <Step title="Build and run">
+    ```bash
+    BUILD_SANDBOX=1 opengame -s -p "your prompt"
+    ```
+  </Step>
+</Steps>
+
+### Custom container flags
+
+Inject arbitrary flags into the `docker` or `podman` command using `SANDBOX_FLAGS`:
+
+```bash
+# Disable SELinux labeling for volume mounts (Podman)
+export SANDBOX_FLAGS="--security-opt label=disable"
+
+# Multiple flags (space-separated)
+export SANDBOX_FLAGS="--flag1 --flag2=value"
+```
+
+### Linux UID/GID handling
+
+The sandbox automatically maps host user permissions on Linux. Override if needed:
+
+```bash
+export SANDBOX_SET_UID_GID=true    # Force host UID/GID mapping
+export SANDBOX_SET_UID_GID=false   # Disable UID/GID mapping
+```
+
+---
+
+## Network proxying
+
+To restrict outbound network access to an allowlist across any sandbox method:
+
+1. Set `GEMINI_SANDBOX_PROXY_COMMAND=<command>` to a command that starts a proxy server listening on `:::8877`.
+2. Use a `*-proxied` Seatbelt profile (macOS) or configure the container's network accordingly.
+
+This is especially useful in CI environments where you want to lock down which external services the model can reach.
+
+---
+
+## Troubleshooting
+
+<AccordionGroup>
+  <Accordion title='"Operation not permitted" error'>
+    The sandboxed process tried to access a path outside the allowed boundary.
+
+    - **Seatbelt**: try a more permissive `SEATBELT_PROFILE` (e.g., switch from `restrictive-open` to `permissive-open`).
+    - **Docker/Podman**: verify the workspace is mounted correctly and that the command does not need access outside the project directory.
+  </Accordion>
+  <Accordion title="Missing commands inside the sandbox">
+    - **Container sandbox**: add the missing tools via `.qwen/sandbox.Dockerfile` or initialize them in `.qwen/sandbox.bashrc`.
+    - **Seatbelt**: your host binaries are used, but some paths may be blocked by the active profile.
+  </Accordion>
+  <Accordion title="Network issues inside the sandbox">
+    Check that your Seatbelt profile allows network access (use an `*-open` or `*-proxied` variant). Verify proxy configuration if using `GEMINI_SANDBOX_PROXY_COMMAND`.
+  </Accordion>
+  <Accordion title="Debugging sandbox behavior">
+    Run with `DEBUG=1` to see detailed sandbox output:
+
+    ```bash
+    DEBUG=1 opengame -s -p "debug command"
+    ```
+
+    Inspect the active environment and mounts:
+
+    ```bash
+    opengame -s -p "run shell command: env | grep SANDBOX"
+    opengame -s -p "run shell command: mount | grep workspace"
+    ```
+
+    <Note>
+    If you have `DEBUG=true` in a project `.env` file, it will not affect the CLI due to automatic exclusion. Use `.qwen/.env` for OpenGame-specific debug settings.
+    </Note>
+  </Accordion>
+</AccordionGroup>
+
+## Security notes
+
+- Sandboxing significantly reduces risk but does not eliminate it entirely.
+- Always use the most restrictive profile that still allows your workflow.
+- Container overhead is minimal after the first image pull or build.
+- GUI applications may not work inside a sandbox.
+
+---
+
+## Related pages
+
+<CardGroup cols={2}>
+  <Card title="Approval modes" icon="shield-check" href="/features/approval-mode">
+    Pair sandboxing with YOLO mode for fully automated but isolated runs.
+  </Card>
+  <Card title="Headless mode" icon="terminal" href="/features/headless">
+    Run sandboxed prompts non-interactively in CI pipelines.
+  </Card>
+  <Card title="Configuration & settings" icon="gear" href="/configuration/settings">
+    Full reference for settings.json options including tools.sandbox.
+  </Card>
+  <Card title="Troubleshooting" icon="circle-question" href="/support/troubleshooting">
+    General troubleshooting for installation and runtime issues.
+  </Card>
+</CardGroup>

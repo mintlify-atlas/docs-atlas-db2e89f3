@@ -1,0 +1,140 @@
+---
+title: 'OpenGame Roadmap: What Is Built and What Comes Next'
+description: "Track OpenGame's feature history by version and explore planned work: GameCoder-27B release, OpenGame-Bench, npm packaging, and the .opengame directory migration."
+---
+
+OpenGame follows an explicit roadmap organized around a single objective: reach and exceed Claude Code's product functionality while continuously refining the details of interactive game generation. The tables below show what has shipped in each version, what is actively in development, and what is on the research horizon.
+
+## Status overview
+
+<CardGroup cols={2}>
+  <Card title="Completed features" icon="circle-check" href="/developers/roadmap">
+    All capabilities marked with a version label have shipped and are available in the current release. The full history goes back to V0.0.5.
+  </Card>
+  <Card title="Planned and in-progress" icon="clock" href="/developers/roadmap">
+    Features without a version label are either planned (P1/P2 priority) or actively in progress. Community contributions are welcome.
+  </Card>
+</CardGroup>
+
+## Feature matrix by category
+
+<Tabs>
+  <Tab title="User Experience">
+    | Feature | Status | Version |
+    |---|---|---|
+    | Terminal UI | Completed | V0.1.0+ |
+    | OpenAI Protocol support | Completed | V0.1.0+ |
+    | Settings / configuration system | Completed | V0.1.0+ |
+    | OAuth login (Qwen OAuth) | Completed | V0.0.5+ |
+    | Cache control (DashScope) | Completed | V0.0.9+ |
+    | Project and global memory | Completed | V0.0.9+ |
+    | Chat compression | Completed | V0.0.11 |
+    | Multi-theme support | Completed | V0.1.0+ |
+    | Internationalization (i18n) | Completed | V0.3.0 |
+    | Session management | Completed | V0.4.0 |
+    | Better UI | Planned (P1) | — |
+    | Onboarding flow | Planned (P1) | — |
+    | Permission system | Planned (P1) | — |
+    | Cross-platform compatibility | In Progress (P1) | — |
+    | Log view | Planned (P2) | — |
+  </Tab>
+  <Tab title="Coding Workflow">
+    | Feature | Status | Version |
+    |---|---|---|
+    | Slash commands | Completed | V0.1.0+ |
+    | MCP integration | Completed | V0.1.0+ |
+    | Plan mode | Completed | V0.0.14 |
+    | TodoWrite | Completed | V0.0.10 |
+    | Sub-agent system | Completed | V0.0.11 |
+    | Multi-model support | Completed | V0.1.0+ |
+    | Chat management (save, restore, browse) | Completed | V0.1.0+ |
+    | Tool: Bash (shell execution) | Completed | V0.1.0+ |
+    | Tool: FileRead / EditFile | Completed | V0.1.0+ |
+    | Tool: TextSearch (ripgrep) | Completed | V0.0.8+ |
+    | Tool: WebFetch | Completed | V0.0.7+ |
+    | Tool: WebSearch (Tavily) | Completed | V0.0.7+ |
+    | Skill system | Completed | V0.6.0 |
+    | Headless mode | Completed | V0.3.0 |
+    | Hooks (extension hooks system) | In Progress (P2) | — |
+  </Tab>
+  <Tab title="Open Capabilities">
+    | Feature | Status | Version |
+    |---|---|---|
+    | Custom commands | Completed | V0.1.0+ |
+    | QwenCode SDK | Completed | V0.4.0 |
+    | Extension system | Planned (P2) | — |
+  </Tab>
+  <Tab title="Ecosystem">
+    | Feature | Status | Version |
+    |---|---|---|
+    | GitHub Actions integration | Completed | V0.5.0 |
+    | VS Code plugin | Completed | V0.5.0 |
+    | ACP / Zed editor integration | Completed | V0.2.0 |
+  </Tab>
+  <Tab title="Administrative">
+    | Feature | Status | Version |
+    |---|---|---|
+    | Usage statistics and quota display | Completed | V0.1.0+ |
+    | Feedback mechanism (`/bug`) | Completed | V0.1.0+ |
+    | Cost tracking and analysis | Planned (P2) | — |
+    | Management dashboard | Planned (P2) | — |
+  </Tab>
+</Tabs>
+
+## Planned and in-progress work
+
+The following items are actively on the roadmap. Priority labels (P1 = higher, P2 = lower) reflect the team's current ordering.
+
+<AccordionGroup>
+  <Accordion title="P1: Cross-platform compatibility (In Progress)">
+    OpenGame currently works best on macOS. The cross-platform compatibility track addresses Windows and Linux gaps in terminal rendering, path handling, sandboxing, and the sandbox container build pipeline. This is a prerequisite for a broad npm public release.
+  </Accordion>
+  <Accordion title="P1: Better UI and onboarding">
+    The terminal UI is functional but the first-run experience is minimal. Planned work includes an onboarding flow that walks new users through API key configuration, model selection, and their first game generation, along with iterative improvements to the interactive terminal layout.
+  </Accordion>
+  <Accordion title="P1: Permission system">
+    The current approval-mode system (`default`, `auto-edit`, `yolo`) is coarse-grained. The permission system track will introduce per-tool and per-directory grants so users can, for example, allow automatic file edits within the game output directory while still requiring confirmation for shell commands.
+  </Accordion>
+  <Accordion title="P2: Hooks (In Progress)">
+    An extension hooks system will expose lifecycle events (pre-prompt, post-tool-execution, session-start, session-end) so integrators can inject custom logic without modifying Core package internals.
+  </Accordion>
+  <Accordion title="P2: Extension system">
+    A first-class extension system will allow distributing bundled skills, custom tools, and UI panels as npm packages, loaded into OpenGame via a configuration entry rather than a source-level dependency.
+  </Accordion>
+  <Accordion title="P2: Log view, costs, and dashboard">
+    Planned administrative features: a structured log viewer for debugging agent runs, per-session cost tracking and aggregation, and a management dashboard for teams running OpenGame in headless/CI environments.
+  </Accordion>
+</AccordionGroup>
+
+## GameCoder-27B public release
+
+GameCoder-27B is a code LLM purpose-built for web game generation, trained through continual pre-training on game engine APIs, supervised fine-tuning on game development trajectories, and reinforcement learning with playability-based reward signals. The model weights have not yet been released publicly.
+
+<Info>
+  The GameCoder-27B model weights are planned for public release. Once available, you can connect OpenGame to a local GameCoder-27B inference endpoint by setting `OPENAI_BASE_URL` and `OPENAI_MODEL` in your environment—no code changes are required.
+</Info>
+
+## OpenGame-Bench release
+
+OpenGame-Bench is an evaluation pipeline that scores agentic game generation along three axes: **Build Health**, **Visual Usability**, and **Intent Alignment**. Unlike static code benchmarks it launches the generated game in a headless browser, drives scripted interactions, and applies a VLM judge for intent alignment scoring.
+
+The evaluation pipeline source will be released as a standalone package. It is currently used internally to measure improvements between GameCoder-27B training runs and to generate the benchmark results reported in the paper.
+
+## npm package release
+
+OpenGame is currently distributed from source only (`git clone` → `npm install` → `npm run build` → `npm link`). A public npm package release is planned for after cross-platform compatibility work is complete, making installation as simple as `npm install -g opengame`.
+
+## `.opengame` directory migration
+
+Configuration and context files are currently stored in `.qwen/` for backward compatibility with the upstream qwen-code agent runtime (e.g., `.qwen/settings.json`, `.qwen/GEMINI.md`). A future release will migrate the on-disk directory name to `.opengame` with a compatibility shim for projects that have existing `.qwen/` directories.
+
+## Research track
+
+The following capabilities are at the research stage—not yet committed to the roadmap but actively being explored:
+
+| Feature | Description |
+|---|---|
+| Home Spotlight | Project discovery and quick launch for managing multiple game projects |
+| Competitive Mode | Evaluation and comparison mode for different agent/model configurations on the same prompt |
+| Pulse | User activity analysis inspired by OpenAI Pulse for understanding usage patterns |
+| Code Wiki | Automatic codebase wiki and documentation generation for generated games |

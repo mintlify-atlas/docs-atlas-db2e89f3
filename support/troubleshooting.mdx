@@ -1,0 +1,361 @@
+---
+title: 'Troubleshooting OpenGame: Common Issues & Fixes'
+description: 'Diagnose and fix installation failures, authentication errors, sandbox problems, MCP disconnects, and game generation issues in OpenGame.'
+---
+
+When something goes wrong with OpenGame, the first step is to run the command again with `DEBUG=1` prepended so you can see exactly what the agent is doing. Most issues fall into one of the categories below — find yours and follow the steps to resolve it.
+
+```bash
+DEBUG=1 opengame -p "your prompt here"
+```
+
+<Note>
+  Set `DEBUG=true` in `.qwen/.env` (not the project root `.env`) to persist debug mode across sessions. Variables in project-root `.env` files are automatically excluded from the CLI to prevent interference.
+</Note>
+
+<AccordionGroup>
+
+  <Accordion title="Installation issues">
+
+    **`opengame` command not found after `npm link`**
+
+    The global binary directory for npm is not on your `PATH`. After running `npm link`, confirm the link target is reachable:
+
+    ```bash
+    npm config get prefix   # shows the prefix directory
+    # The 'bin' subdirectory of this path must be on your PATH
+    echo $PATH
+    ```
+
+    Add the missing directory to your shell profile (`.bashrc`, `.zshrc`, etc.) and reload:
+
+    ```bash
+    export PATH="$(npm config get prefix)/bin:$PATH"
+    ```
+
+    **Node.js version too old**
+
+    OpenGame requires Node.js 20 or newer. Check your version:
+
+    ```bash
+    node -v
+    ```
+
+    If it prints anything below `v20`, install a supported release from [nodejs.org](https://nodejs.org/en/download) or use a version manager like `nvm`:
+
+    ```bash
+    nvm install 20
+    nvm use 20
+    ```
+
+    **`MODULE_NOT_FOUND` or import errors at startup**
+
+    Dependencies are missing or the project has not been compiled. Run all three steps in order:
+
+    ```bash
+    npm install
+    npm run build
+    npm link
+    ```
+
+    Verify the build succeeded before running `npm link`. If errors appear during `npm run build`, they must be resolved first.
+
+  </Accordion>
+
+  <Accordion title="Authentication errors">
+
+    **Invalid API key or 401 Unauthorized**
+
+    Confirm the environment variable is set in the current shell session:
+
+    ```bash
+    echo $OPENAI_API_KEY
+    ```
+
+    An empty line means the variable is not exported. Set it explicitly:
+
+    ```bash
+    export OPENAI_API_KEY="your-api-key-here"
+    ```
+
+    If you are using a provider other than OpenAI, also set `OPENAI_BASE_URL` to the correct endpoint:
+
+    ```bash
+    export OPENAI_BASE_URL="https://your-provider.com/v1"
+    ```
+
+    **Stuck after authentication failure — UI does not appear**
+
+    A failed authentication attempt can persist the selected auth type in `settings.json`. OpenGame then tries to re-authenticate with the broken type on the next launch and hangs before displaying the UI.
+
+    Open your user settings file and remove the `security.auth.selectedType` field:
+
+    ```bash
+    # Default location
+    ~/.qwen/settings.json
+    # Project-specific
+    .qwen/settings.json
+    ```
+
+    Restart OpenGame after saving the file. It will prompt you to choose an authentication method again.
+
+    **SSL certificate error (`UNABLE_TO_GET_ISSUER_CERT_LOCALLY`)**
+
+    Corporate networks often intercept TLS traffic with a custom root CA that Node.js does not trust by default. Point Node.js to your corporate certificate:
+
+    ```bash
+    export NODE_EXTRA_CA_CERTS=/path/to/corporate-ca.crt
+    ```
+
+    Ask your IT department for the certificate file if you do not have it.
+
+  </Accordion>
+
+  <Accordion title="API key and provider configuration errors">
+
+    **`MissingProviderConfigError` during asset generation**
+
+    OpenGame generates game assets (images, video, audio) through separate provider APIs, each configured independently. If you have not set the variables for a modality the agent is trying to use, you will see a message like:
+
+    ```
+    OpenGame is missing API configuration for the "image" modality.
+
+    Set OPENGAME_IMAGE_PROVIDER to one of "tongyi", "doubao", or "openai-compat" ...
+    ```
+
+    Set the four variables for each modality you need:
+
+    ```bash
+    export OPENGAME_IMAGE_PROVIDER=tongyi          # or doubao / openai-compat
+    export OPENGAME_IMAGE_API_KEY=sk-...
+    export OPENGAME_IMAGE_BASE_URL=...             # required for openai-compat
+    export OPENGAME_IMAGE_MODEL=wan2.5-t2i-preview # required for openai-compat
+    ```
+
+    Repeat the pattern for `REASONING`, `VIDEO`, and `AUDIO` as needed. See [API Keys & Provider Configuration](/configuration/api-keys) for the full reference.
+
+    **Provider status banner shows missing modalities**
+
+    OpenGame prints a one-line provider-status banner at startup. A missing modality appears as `—` rather than the provider name. This is not a fatal error — the agent will continue and only fail if it tries to invoke a tool for that modality. You can proceed without configuring providers you do not intend to use.
+
+    **Wrong base URL for `openai-compat` provider**
+
+    The `openai-compat` provider requires both `_BASE_URL` and `_MODEL` to be set explicitly. Without `_BASE_URL`, requests will fail or go to the wrong endpoint. Double-check the URL format ends with `/v1`:
+
+    ```bash
+    export OPENGAME_REASONING_BASE_URL="https://api.openai.com/v1"
+    ```
+
+  </Accordion>
+
+  <Accordion title="Game generation issues">
+
+    **The game doesn't start or the browser shows a blank page**
+
+    Run the generated game's dev server directly to see any build or runtime errors:
+
+    ```bash
+    cd your-game-folder
+    npm install
+    npm run dev
+    ```
+
+    Check the browser console (F12) for JavaScript errors. Then ask OpenGame to fix them:
+
+    ```
+    The game shows a blank page. The browser console shows: [paste error here]. Please fix it.
+    ```
+
+    **Broken interactions (clicks or key presses do nothing)**
+
+    Debug Skill is designed to catch these problems automatically, but it may miss edge cases. Describe the specific broken interaction to OpenGame and it will reopen the game, test it, and apply fixes:
+
+    ```
+    Pressing the space bar to jump does nothing. Fix the jump input handling.
+    ```
+
+    **Game generation stops midway or hits the turn limit**
+
+    In non-interactive (headless) mode, the session ends when the maximum number of turns is reached (exit code `53`). For complex games, use interactive mode so you can guide the agent past difficult steps:
+
+    ```bash
+    opengame   # start interactively, then describe your game
+    ```
+
+    Alternatively, break the prompt into smaller pieces: generate the core loop first, then iterate.
+
+  </Accordion>
+
+  <Accordion title="Sandbox issues">
+
+    **Docker not found or sandbox does not start**
+
+    On Linux and Windows, container-based sandboxing requires Docker or Podman to be installed and running. Verify:
+
+    ```bash
+    docker info
+    # or
+    podman info
+    ```
+
+    If the daemon is not running, start it and try again. On macOS, you can use the built-in Seatbelt sandbox instead, which requires no additional software:
+
+    ```bash
+    export GEMINI_SANDBOX=sandbox-exec
+    opengame -s -p "your prompt"
+    ```
+
+    **"Operation not permitted" inside the sandbox**
+
+    The sandbox restricts writes to outside the project directory. If the agent is trying to write elsewhere, switch to a more permissive Seatbelt profile (macOS):
+
+    ```bash
+    export SEATBELT_PROFILE=permissive-open
+    ```
+
+    On Docker/Podman, verify that the workspace directory is mounted correctly and that the operation does not require access outside the project directory.
+
+    **Missing commands inside the container**
+
+    Tools like `git`, `python`, or `rg` may not be available in the default sandbox image. Add them via a custom Dockerfile placed at `.qwen/sandbox.Dockerfile`, then rebuild:
+
+    ```bash
+    BUILD_SANDBOX=1 opengame -s -p "your prompt"
+    ```
+
+    **Debug mode for sandbox issues**
+
+    ```bash
+    DEBUG=1 opengame -s -p "your prompt"
+    ```
+
+    To inspect what is happening inside the sandbox:
+
+    ```bash
+    opengame -s -p "run shell command: env | grep SANDBOX"
+    opengame -s -p "run shell command: mount | grep workspace"
+    ```
+
+    See [Sandbox](/features/sandbox) for the full configuration reference.
+
+  </Accordion>
+
+  <Accordion title="MCP server connection issues">
+
+    **MCP server shows as disconnected**
+
+    Check that the server command in your `settings.json` is correct and that any required binaries are installed and on your `PATH`. Restart OpenGame after fixing the configuration.
+
+    **`stdio` transport fails to start**
+
+    The `command` field for a stdio MCP server must be an executable that is reachable from your shell. Test the command directly:
+
+    ```bash
+    your-mcp-server-command
+    ```
+
+    If it fails outside OpenGame, fix the PATH or permissions issue first.
+
+    **Environment variables not resolving inside the MCP server**
+
+    Settings files support `$VAR_NAME` and `${VAR_NAME}` expansion, but only for variables that are set in the environment at the time OpenGame loads the file. Variables defined in a project `.env` file are not automatically available when the MCP server subprocess starts. Export them in your shell profile instead.
+
+    **Port already in use (`EADDRINUSE`)**
+
+    Another process is bound to the port your MCP server is trying to use. Either stop that process or configure the MCP server to listen on a different port.
+
+  </Accordion>
+
+  <Accordion title="File search performance issues">
+
+    File search (used by `@` completions and context discovery) can slow down significantly in large projects. Apply these fixes in order:
+
+    <Steps>
+      <Step title="Add a .qwenignore file">
+        Exclude build artifacts, logs, and `node_modules` from crawling. This is the most effective improvement:
+
+        ```
+        node_modules/
+        dist/
+        .next/
+        *.log
+        ```
+      </Step>
+      <Step title="Disable fuzzy search">
+        Add the following to your `settings.json` if ignoring files is not enough:
+
+        ```json
+        {
+          "context": {
+            "fileFiltering": {
+              "disableFuzzySearch": true
+            }
+          }
+        }
+        ```
+      </Step>
+      <Step title="Disable recursive search entirely">
+        As a last resort, disable recursive file search. You will need to type full paths for `@` completions:
+
+        ```json
+        {
+          "context": {
+            "fileFiltering": {
+              "enableRecursiveFileSearch": false
+            }
+          }
+        }
+        ```
+      </Step>
+    </Steps>
+
+  </Accordion>
+
+  <Accordion title="OpenGame not entering interactive mode in CI environments">
+
+    If an environment variable with a `CI_` prefix (e.g., `CI_TOKEN`) is set, the underlying UI framework detects it as a non-interactive CI environment and OpenGame will not display a prompt. Unset the interfering variable for the duration of the command:
+
+    ```bash
+    env -u CI_TOKEN opengame
+    ```
+
+    Or use headless mode, which is designed for non-interactive environments:
+
+    ```bash
+    opengame -p "your prompt"
+    ```
+
+  </Accordion>
+
+</AccordionGroup>
+
+## Exit codes
+
+When running in headless or scripting mode, OpenGame reports the reason for termination through its exit code:
+
+| Exit code | Meaning |
+|-----------|---------|
+| `41` | Authentication failed (`FatalAuthenticationError`) |
+| `42` | Invalid or missing input provided (`FatalInputError`) |
+| `44` | Sandbox environment error (`FatalSandboxError`) |
+| `52` | `settings.json` is invalid or contains errors (`FatalConfigError`) |
+| `53` | Maximum session turn limit reached (`FatalTurnLimitedError`) |
+
+## Still stuck?
+
+Search the [OpenGame issue tracker on GitHub](https://github.com/leigest519/OpenGame/issues) for similar reports. If you cannot find a match, open a new issue with the full error message, your Node.js version (`node -v`), and the output of `DEBUG=1 opengame ...`.
+
+<CardGroup cols={2}>
+  <Card title="FAQ" icon="circle-question" href="/support/faq">
+    Answers to common questions about models, prompts, sessions, and configuration.
+  </Card>
+  <Card title="Sandbox" icon="shield" href="/features/sandbox">
+    Full reference for configuring and debugging the OpenGame sandbox.
+  </Card>
+  <Card title="API Keys & Providers" icon="key" href="/configuration/api-keys">
+    Set up image, video, audio, and reasoning provider credentials.
+  </Card>
+  <Card title="Configuration" icon="gear" href="/configuration/settings">
+    All settings.json fields and environment variable options.
+  </Card>
+</CardGroup>

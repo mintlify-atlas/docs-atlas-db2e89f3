@@ -1,97 +1,67 @@
 ---
-title: "Introduction"
-description: "Welcome to the new home for your documentation"
+title: "OpenGame: Agentic Game Creation from a Prompt"
+description: "OpenGame is an open-source CLI framework that turns natural-language game-design prompts into fully playable web games end-to-end."
 ---
 
-## Setting up
+OpenGame is an open-source agentic framework that lives in your terminal. Describe a game in plain language — a Snake clone, a tower defense, a side-scrolling platformer — and OpenGame plans the architecture, scaffolds the project, writes the code, runs it in a sandboxed browser, and iteratively debugs it until it is fully playable.
 
-Get your documentation site up and running in minutes.
-
-<Card
-  title="Start here"
-  icon="rocket"
-  href="/quickstart"
-  horizontal
->
-  Follow our three step quickstart guide.
-</Card>
-
-## Make it yours
-
-Design a docs site that looks great and empowers your users.
-
-<Columns cols={2}>
-  <Card
-    title="Edit locally"
-    icon="pen-to-square"
-    href="/development"
-  >
-    Edit your docs locally and preview them in real time.
+<CardGroup cols={2}>
+  <Card title="Quickstart" icon="rocket" href="/quickstart">
+    Install OpenGame and generate your first playable web game in minutes
   </Card>
-  <Card
-    title="Customize your site"
-    icon="palette"
-    href="/essentials/settings"
-  >
-    Customize the design and colors of your site to match your brand.
+  <Card title="Game Skill" icon="gamepad" href="/game-skill">
+    Learn how Template Skill and Debug Skill power end-to-end game creation
   </Card>
-    <Card
-    title="Set up navigation"
-    icon="map"
-    href="/essentials/navigation"
-  >
-    Organize your docs to help users find what they need and succeed with your product.
+  <Card title="Configuration" icon="gear" href="/configuration/api-keys">
+    Set up your API keys for image, video, audio, and reasoning providers
   </Card>
-  <Card
-    title="API documentation"
-    icon="terminal"
-    href="/api-reference/introduction"
-  >
-    Auto-generate API documentation from OpenAPI specifications.
+  <Card title="TypeScript SDK" icon="code" href="/developers/sdk-typescript">
+    Use the programmatic SDK to integrate OpenGame into your own tools
   </Card>
-</Columns>
+</CardGroup>
 
-## Create beautiful pages
+## How it works
 
-Everything you need to create world-class documentation.
+OpenGame combines a purpose-built CLI with **Game Skill** — a two-part agent capability that separates stable scaffolding from systematic debugging.
 
-<Columns cols={2}>
-  <Card
-    title="Write with MDX"
-    icon="pen-fancy"
-    href="/essentials/markdown"
-  >
-    Use MDX to style your docs pages.
-  </Card>
-  <Card
-    title="Code samples"
-    icon="code"
-    href="/essentials/code"
-  >
-    Add sample code to demonstrate how to use your product.
-  </Card>
-  <Card
-    title="Images"
-    icon="image"
-    href="/essentials/images"
-  >
-    Display images and other media.
-  </Card>
-  <Card
-    title="Reusable snippets"
-    icon="recycle"
-    href="/essentials/reusable-snippets"
-  >
-    Write once and reuse across your docs.
-  </Card>
-</Columns>
+<Steps>
+  <Step title="Install OpenGame">
+    Clone the repo, run `npm install && npm run build && npm link` to expose the `opengame` command on your PATH.
+  </Step>
+  <Step title="Set your API key">
+    Export `OPENAI_API_KEY` (or swap in GameCoder-27B for maximum game-coding accuracy). Optionally configure image, video, and audio providers for full asset generation.
+  </Step>
+  <Step title="Describe your game">
+    Create an empty folder, run `opengame`, and describe the game you want. OpenGame selects the right engine (canvas, Phaser, three.js), scaffolds the project, and writes the code.
+  </Step>
+  <Step title="Play and iterate">
+    Open the generated `index.html` in your browser. Keep chatting with OpenGame to add features, fix bugs, or change the art style — it edits files and re-verifies playability after each change.
+  </Step>
+</Steps>
 
-## Need inspiration?
+## Key capabilities
 
-<Card
-  title="See complete examples"
-  icon="stars"
-  href="https://mintlify.com/customers"
->
-  Browse our showcase of exceptional documentation sites.
-</Card>
+<CardGroup cols={2}>
+  <Card title="Headless & scriptable" icon="terminal" href="/features/headless">
+    Run `opengame -p "..."` for CI pipelines, batch generation, and benchmark automation
+  </Card>
+  <Card title="Approval modes" icon="shield-check" href="/features/approval-mode">
+    Fine-grained control: Plan, Default, Auto-Edit, and YOLO modes
+  </Card>
+  <Card title="MCP integration" icon="plug" href="/features/mcp">
+    Connect external tools, databases, and APIs via Model Context Protocol
+  </Card>
+  <Card title="Agent Skills" icon="wand-magic-sparkles" href="/features/skills">
+    Extend OpenGame with modular, shareable Skills stored in your repo
+  </Card>
+  <Card title="Subagents" icon="robot" href="/features/sub-agents">
+    Delegate specialized tasks to focused AI assistants with controlled tool access
+  </Card>
+  <Card title="Sandboxing" icon="box" href="/features/sandbox">
+    Isolate shell commands and file operations with Docker, Podman, or macOS Seatbelt
+  </Card>
+</CardGroup>
+
+<Note>
+  OpenGame is built on top of [qwen-code](https://github.com/QwenLM/qwen-code) (itself based on Google Gemini CLI). Features like Plan Mode, SubAgents, MCP, and the TypeScript SDK all come from that lineage and work in OpenGame.
+</Note>

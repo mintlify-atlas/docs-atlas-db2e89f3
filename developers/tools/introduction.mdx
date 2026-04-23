@@ -1,0 +1,152 @@
+---
+title: 'Built-in Tools for OpenGame Developers (Overview)'
+description: 'A complete reference to every built-in tool the OpenGame agent can call — from file system access and shell execution to web fetch and MCP integration.'
+---
+
+OpenGame exposes a rich set of built-in tools that the underlying language model can invoke during a game-generation session. When the model receives your prompt it may determine — often within a single turn — that reading template files, running a build command, or fetching a remote asset specification is required before it can produce a useful response. The core package (`packages/core`) manages the full lifecycle: presenting tool schemas to the model, validating every request, requesting user confirmation where appropriate, executing the tool, and feeding the result back into the conversation.
+
+## How tools work
+
+Each tool is implemented as a `DeclarativeTool` subclass that exposes a JSON-schema-validated `FunctionDeclaration`. The model receives these declarations alongside your prompt and, if it decides a tool is needed, emits a structured `FunctionCall`. The core then validates the parameters, checks whether confirmation is required, runs the tool, and streams the `ToolResult` back.
+
+<Steps>
+  <Step title="You send a prompt">
+    The CLI forwards your message plus the full conversation history to the configured model API.
+  </Step>
+  <Step title="The model requests a tool">
+    The model returns a `FunctionCall` naming the tool and providing typed parameters.
+  </Step>
+  <Step title="Core validates and (maybe) confirms">
+    The `packages/core` package validates parameters against the tool's JSON schema. For tools that mutate state — writing files, running shell commands, calling MCP servers — it shows a confirmation dialog unless the operation has been pre-approved.
+  </Step>
+  <Step title="Tool executes">
+    The tool runs and returns a `ToolResult` containing `llmContent` (fed back to the model) and `returnDisplay` (rendered in the CLI).
+  </Step>
+  <Step title="Model continues">
+    The model reads the tool output and either produces its final answer or requests another tool call.
+  </Step>
+</Steps>
+
+## Security and approval model
+
+OpenGame divides tools into two broad categories based on whether they have side effects:
+
+<CardGroup cols={2}>
+  <Card title="Read-only tools" icon="eye">
+    **No confirmation required.** These tools only observe the file system or network without making changes. The model can call them freely.
+
+    - `read_file`
+    - `read_many_files`
+    - `list_directory`
+    - `glob`
+    - `grep_search`
+    - `web_fetch` (confirmation is shown once per URL)
+    - `web_search`
+    - `save_memory`
+    - `todo_write`
+  </Card>
+  <Card title="Mutating tools" icon="shield-alert">
+    **Confirmation required by default.** Before executing, OpenGame shows a diff or command preview and waits for your approval.
+
+    - `write_file`
+    - `edit`
+    - `run_shell_command`
+    - MCP server tools (unless `trust: true`)
+  </Card>
+</CardGroup>
+
+The confirmation behaviour is driven by the `Kind` enum defined in `packages/core/src/tools/tools.ts`:
+
+```typescript
+export enum Kind {
+  Read    = 'read',
+  Edit    = 'edit',
+  Delete  = 'delete',
+  Move    = 'move',
+  Search  = 'search',
+  Execute = 'execute',
+  Think   = 'think',
+  Fetch   = 'fetch',
+  Other   = 'other',
+}
+
+// Kinds that always trigger a confirmation gate
+export const MUTATOR_KINDS: Kind[] = [
+  Kind.Edit,
+  Kind.Delete,
+  Kind.Move,
+  Kind.Execute,
+];
+```
+
+You can tighten or loosen the confirmation policy for shell commands via `tools.core` and `tools.exclude` in `settings.json`. MCP server tools can be fully trusted by setting `trust: true` on the server configuration — see the [MCP server tools](/developers/tools/mcp-server) page for details.
+
+## How tools are registered
+
+On startup, the core builds a **ToolRegistry** that collects every built-in tool. MCP server tools are discovered asynchronously via `discoverMcpTools()` in `packages/core/src/tools/mcp-client.ts` and registered in the same registry. The registry resolves naming conflicts between MCP servers by automatically prefixing duplicate tool names with the server name (e.g., `myServer__toolName`).
+
+The complete set of canonical tool names is defined in `packages/core/src/tools/tool-names.ts`:
+
+```typescript
+export const ToolNames = {
+  EDIT:              'edit',
+  WRITE_FILE:        'write_file',
+  READ_FILE:         'read_file',
+  READ_MANY_FILES:   'read_many_files',
+  GREP:              'grep_search',
+  GLOB:              'glob',
+  SHELL:             'run_shell_command',
+  TODO_WRITE:        'todo_write',
+  MEMORY:            'save_memory',
+  TASK:              'task',
+  EXIT_PLAN_MODE:    'exit_plan_mode',
+  WEB_FETCH:         'web_fetch',
+  WEB_SEARCH:        'web_search',
+  LS:                'list_directory',
+  GENERATE_ASSETS:   'generate_game_assets',
+  GENERATE_TILEMAP:  'generate_tilemap',
+  GAME_TYPE_CLASSIFIER: 'classify_game_type',
+  GENERATE_GDD:      'generate_gdd',
+} as const;
+```
+
+## All built-in tools at a glance
+
+| Tool name | Display name | Requires confirmation | Description |
+|---|---|---|---|
+| `read_file` | ReadFile | No | Read a single file (text, image, PDF) |
+| `write_file` | WriteFile | Yes | Create or overwrite a file |
+| `edit` | Edit | Yes | Exact string replacement inside a file |
+| `read_many_files` | ReadManyFiles | No | Read multiple files via glob patterns |
+| `list_directory` | ListFiles | No | List files in a directory |
+| `glob` | Glob | No | Find files by glob pattern |
+| `grep_search` | Grep | No | Search file content by regex |
+| `run_shell_command` | Shell | Yes | Execute a shell command |
+| `web_fetch` | WebFetch | Once per URL | Fetch and summarise a web page |
+| `web_search` | WebSearch | No | Search the web via Tavily, Google, or DashScope |
+| `save_memory` | SaveMemory | No | Persist a fact to `~/.qwen/QWEN.md` |
+| `todo_write` | TodoWrite | No | Create or update the session task list |
+| `task` | Task | No | Delegate work to a specialised subagent |
+| `exit_plan_mode` | ExitPlanMode | No | Exit plan mode and proceed with implementation |
+| MCP tools | varies | Yes (unless trusted) | Tools discovered from configured MCP servers |
+| `generate_game_assets` | GenerateAssets | No | Generate game asset files |
+| `generate_tilemap` | GenerateTilemap | No | Generate tilemaps for game levels |
+| `classify_game_type` | GameTypeClassifier | No | Classify the type of game being built |
+| `generate_gdd` | GenerateGDD | No | Generate a game design document |
+
+## Learn more
+
+<CardGroup cols={2}>
+  <Card title="File system tools" icon="folder-open" href="/developers/tools/file-system">
+    `read_file`, `write_file`, `edit`, `read_many_files`, `list_directory`, `glob`, `grep_search`
+  </Card>
+  <Card title="Shell tool" icon="terminal" href="/developers/tools/shell">
+    `run_shell_command` — approval gates, command restrictions, interactive shell mode
+  </Card>
+  <Card title="Web tools" icon="globe" href="/developers/tools/web-fetch">
+    `web_fetch` and `web_search` — fetching pages and querying search providers
+  </Card>
+  <Card title="MCP server tools" icon="server" href="/developers/tools/mcp-server">
+    Connecting external MCP servers, tool discovery, trust settings, and name prefixing
+  </Card>
+</CardGroup>
